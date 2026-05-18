@@ -1,0 +1,8 @@
+{
+  "name": "Port Services Division Dashboard",
+  "description": "A comprehensive maritime dashboard for tracking vessel information, fleet statistics, and payment revenues fetched from live Google Sheets databases.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
