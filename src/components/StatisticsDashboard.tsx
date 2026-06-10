@@ -1,6 +1,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { VesselData } from '../types';
+import { formatSystemDate } from '../utils/dateFormatter';
 import { 
   Ship, 
   Globe, 
@@ -272,14 +273,24 @@ export const StatisticsDashboard: React.FC<StatisticsDashboardProps> = ({ data, 
         return matchesOrientation && isDeparted;
       });
       const calls = vessels.length;
-      const totalVolume = vessels.reduce((acc, v) => acc + (v.cargoVolumeMT || 0), 0);
+
+      // AVERAGE VOLUME EXCHANGE MT on the spreadsheet only averages non-zero cargo exchanges
+      const vesselsWithCargo = vessels.filter(v => (v.cargoVolumeMT || 0) > 0);
+      const totalVolume = vesselsWithCargo.reduce((acc, v) => acc + (v.cargoVolumeMT || 0), 0);
+      const avgVolume = vesselsWithCargo.length > 0 ? totalVolume / vesselsWithCargo.length : 0;
+
       const totalBerthTime = vessels.reduce((acc, v) => acc + (v.atBerthDays || 0), 0);
+      const avgBerthTime = calls > 0 ? totalBerthTime / calls : 0;
+
+      // AVERAGE of GROSS BERTH PRODUCTIVITY (MT/DAY) in the sheet is the average of row level productivities
+      const totalProductivity = vessels.reduce((acc, v) => acc + (v.berthProductivity || 0), 0);
+      const avgProductivity = calls > 0 ? totalProductivity / calls : 0;
 
       return {
         calls,
-        avgVolume: calls > 0 ? totalVolume / calls : 0,
-        avgBerthTime: calls > 0 ? totalBerthTime / calls : 0,
-        avgProductivity: totalBerthTime > 0 ? totalVolume / totalBerthTime : 0
+        avgVolume,
+        avgBerthTime,
+        avgProductivity
       };
     };
 
@@ -691,96 +702,136 @@ export const StatisticsDashboard: React.FC<StatisticsDashboardProps> = ({ data, 
       </div>
 
       {/* Cargo Mix Distribution Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Domestic Cargo Mix Table */}
-        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="bg-fab-cyan text-white px-4 py-3 flex justify-between items-center">
-            <h3 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2">
-              <Scale className="w-3.5 h-3.5" /> Domestic Cargo Mix
-            </h3>
-            <span className="text-[10px] font-medium opacity-80">METRIC TONS (MT)</span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-center font-sans border-collapse">
-              <thead>
-                <tr className="bg-slate-50 text-[9px] font-bold uppercase border-b border-slate-100 text-slate-400">
-                  <th className="p-4 border-r border-slate-100 text-left">Shipment Kind</th>
-                  <th className="p-4 border-r border-slate-100">Weight (MT)</th>
-                  <th className="p-4 text-right pr-6">% Share</th>
-                </tr>
-              </thead>
-              <tbody className="text-[10px] uppercase font-medium">
-                {domesticCargoMixStats.map((item, idx) => (
-                  <tr 
-                    key={idx} 
-                    className="border-b border-slate-50 hover:bg-slate-50 transition-colors cursor-pointer"
-                    onClick={() => handleRowClick(`Domestic Cargo: ${item.name}`, v => v.orientation === 'Domestic' && (v.shipmentKind || 'OTHERS') === item.name)}
-                  >
-                    <td className="p-4 border-r border-slate-100 text-left font-bold text-slate-500">{item.name}</td>
-                    <td className="p-4 border-r border-slate-100 text-slate-600">{formatInt(Math.round(item.weight))}</td>
-                    <td className="p-4 text-right pr-6 font-bold text-fab-cyan bg-fab-cyan/5">
-                      {item.percentage.toFixed(2)}%
-                    </td>
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Domestic Cargo Mix Table */}
+          <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="bg-fab-cyan text-white px-4 py-3 flex justify-between items-center">
+              <h3 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2">
+                <Scale className="w-3.5 h-3.5" /> Domestic Cargo Mix
+              </h3>
+              <span className="text-[10px] font-medium opacity-80">METRIC TONS (MT)</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-center font-sans border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 text-[9px] font-bold uppercase border-b border-slate-100 text-slate-400">
+                    <th className="p-4 border-r border-slate-100 text-left">Shipment Kind</th>
+                    <th className="p-4 border-r border-slate-100">Weight (MT)</th>
+                    <th className="p-4 text-right pr-6">% Share</th>
                   </tr>
-                ))}
-                {domesticCargoMixStats.length === 0 && (
-                  <tr><td colSpan={3} className="p-8 text-center text-slate-400 italic">No domestic cargo records</td></tr>
-                )}
-                <tr className="bg-slate-100 font-extrabold text-fab-blue">
-                  <td className="p-4 border-r border-slate-100 text-left">CARGO SUB-TOTAL</td>
-                  <td className="p-4 border-r border-slate-100">
-                    {formatInt(Math.round(domesticCargoMixStats.reduce((acc, i) => acc + i.weight, 0)))}
-                  </td>
-                  <td className="p-4 text-right pr-6">100.00%</td>
-                </tr>
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="text-[10px] uppercase font-medium">
+                  {domesticCargoMixStats.map((item, idx) => (
+                    <tr 
+                      key={idx} 
+                      className="border-b border-slate-50 hover:bg-slate-50 transition-colors cursor-pointer"
+                      onClick={() => handleRowClick(`Domestic Cargo: ${item.name}`, v => v.orientation === 'Domestic' && (v.shipmentKind || 'OTHERS') === item.name)}
+                    >
+                      <td className="p-4 border-r border-slate-100 text-left font-bold text-slate-500">{item.name}</td>
+                      <td className="p-4 border-r border-slate-100 text-slate-600">{formatNum(item.weight)}</td>
+                      <td className="p-4 text-right pr-6 font-bold text-fab-cyan bg-fab-cyan/5">
+                        {item.percentage.toFixed(3)}%
+                      </td>
+                    </tr>
+                  ))}
+                  {domesticCargoMixStats.length === 0 && (
+                    <tr><td colSpan={3} className="p-8 text-center text-slate-400 italic">No domestic cargo records</td></tr>
+                  )}
+                  <tr className="bg-slate-100 font-extrabold text-fab-blue">
+                    <td className="p-4 border-r border-slate-100 text-left">CARGO SUB-TOTAL</td>
+                    <td className="p-4 border-r border-slate-100">
+                      {formatNum(domesticCargoMixStats.reduce((acc, i) => acc + i.weight, 0))}
+                    </td>
+                    <td className="p-4 text-right pr-6">100.000%</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Foreign Cargo Mix Table */}
+          <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="bg-fab-blue text-white px-4 py-3 flex justify-between items-center">
+              <h3 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2">
+                <Scale className="w-3.5 h-3.5" /> Foreign Cargo Mix
+              </h3>
+              <span className="text-[10px] font-medium opacity-80">METRIC TONS (MT)</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-center font-sans border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 text-[9px] font-bold uppercase border-b border-slate-100 text-slate-400">
+                    <th className="p-4 border-r border-slate-100 text-left">Shipment Kind</th>
+                    <th className="p-4 border-r border-slate-100">Weight (MT)</th>
+                    <th className="p-4 text-right pr-6">% Share</th>
+                  </tr>
+                </thead>
+                <tbody className="text-[10px] uppercase font-medium">
+                  {foreignCargoMixStats.map((item, idx) => (
+                    <tr 
+                      key={idx} 
+                      className="border-b border-slate-50 hover:bg-slate-50 transition-colors cursor-pointer"
+                      onClick={() => handleRowClick(`Foreign Cargo: ${item.name}`, v => v.orientation === 'Foreign' && (v.shipmentKind || 'OTHERS') === item.name)}
+                    >
+                      <td className="p-4 border-r border-slate-100 text-left font-bold text-slate-500">{item.name}</td>
+                      <td className="p-4 border-r border-slate-100 text-slate-600">{formatNum(item.weight)}</td>
+                      <td className="p-4 text-right pr-6 font-bold text-fab-gold bg-fab-gold/5">
+                        {item.percentage.toFixed(3)}%
+                      </td>
+                    </tr>
+                  ))}
+                  {foreignCargoMixStats.length === 0 && (
+                    <tr><td colSpan={3} className="p-8 text-center text-slate-400 italic">No foreign cargo records</td></tr>
+                  )}
+                  <tr className="bg-slate-100 font-extrabold text-fab-blue">
+                    <td className="p-4 border-r border-slate-100 text-left">CARGO SUB-TOTAL</td>
+                    <td className="p-4 border-r border-slate-100">
+                      {formatNum(foreignCargoMixStats.reduce((acc, i) => acc + i.weight, 0))}
+                    </td>
+                    <td className="p-4 text-right pr-6">100.000%</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
 
-        {/* Foreign Cargo Mix Table */}
-        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="bg-fab-blue text-white px-4 py-3 flex justify-between items-center">
-            <h3 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2">
-              <Scale className="w-3.5 h-3.5" /> Foreign Cargo Mix
-            </h3>
-            <span className="text-[10px] font-medium opacity-80">METRIC TONS (MT)</span>
+        {/* Aggregate Cargo Mix Total Summary Card */}
+        <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4 flex flex-col md:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-3">
+            <div className="bg-fab-blue/10 p-2.5 rounded-lg text-fab-blue">
+              <Scale className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Aggregate Cargo Mix Summary</h4>
+              <p className="text-sm font-black text-fab-blue uppercase">Combined Distribution Total</p>
+            </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-center font-sans border-collapse">
-              <thead>
-                <tr className="bg-slate-50 text-[9px] font-bold uppercase border-b border-slate-100 text-slate-400">
-                  <th className="p-4 border-r border-slate-100 text-left">Shipment Kind</th>
-                  <th className="p-4 border-r border-slate-100">Weight (MT)</th>
-                  <th className="p-4 text-right pr-6">% Share</th>
-                </tr>
-              </thead>
-              <tbody className="text-[10px] uppercase font-medium">
-                {foreignCargoMixStats.map((item, idx) => (
-                  <tr 
-                    key={idx} 
-                    className="border-b border-slate-50 hover:bg-slate-50 transition-colors cursor-pointer"
-                    onClick={() => handleRowClick(`Foreign Cargo: ${item.name}`, v => v.orientation === 'Foreign' && (v.shipmentKind || 'OTHERS') === item.name)}
-                  >
-                    <td className="p-4 border-r border-slate-100 text-left font-bold text-slate-500">{item.name}</td>
-                    <td className="p-4 border-r border-slate-100 text-slate-600">{formatInt(Math.round(item.weight))}</td>
-                    <td className="p-4 text-right pr-6 font-bold text-fab-gold bg-fab-gold/5">
-                      {item.percentage.toFixed(2)}%
-                    </td>
-                  </tr>
-                ))}
-                {foreignCargoMixStats.length === 0 && (
-                  <tr><td colSpan={3} className="p-8 text-center text-slate-400 italic">No foreign cargo records</td></tr>
-                )}
-                <tr className="bg-slate-100 font-extrabold text-fab-blue">
-                  <td className="p-4 border-r border-slate-100 text-left">CARGO SUB-TOTAL</td>
-                  <td className="p-4 border-r border-slate-100">
-                    {formatInt(Math.round(foreignCargoMixStats.reduce((acc, i) => acc + i.weight, 0)))}
-                  </td>
-                  <td className="p-4 text-right pr-6">100.00%</td>
-                </tr>
-              </tbody>
-            </table>
+          <div className="flex flex-wrap gap-x-8 gap-y-2 justify-end w-full md:w-auto text-right">
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 block uppercase">Domestic Cargo Mix Total</span>
+              <span className="text-xs font-extrabold text-fab-cyan font-mono">
+                {formatNum(domesticCargoMixStats.reduce((acc, i) => acc + i.weight, 0))} MT
+              </span>
+            </div>
+            <div className="border-r border-slate-100 pr-8 hidden md:block" />
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 block uppercase">Foreign Cargo Mix Total</span>
+              <span className="text-xs font-extrabold text-fab-gold font-mono">
+                {formatNum(foreignCargoMixStats.reduce((acc, i) => acc + i.weight, 0))} MT
+              </span>
+            </div>
+            <div className="border-r border-slate-150 pr-8 hidden md:block" />
+            <div className="pl-4 md:pl-0 border-l border-slate-100 md:border-none">
+              <span className="text-[10px] font-extrabold text-fab-blue block uppercase">Grand Cargo Mix Total</span>
+              <span className="text-sm font-black text-fab-blue font-mono bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
+                {formatNum(
+                  domesticCargoMixStats.reduce((acc, i) => acc + i.weight, 0) +
+                  foreignCargoMixStats.reduce((acc, i) => acc + i.weight, 0)
+                )} MT
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -818,13 +869,13 @@ export const StatisticsDashboard: React.FC<StatisticsDashboardProps> = ({ data, 
                   <>
                     <td className="p-3 border-r border-slate-100 text-left pl-6 text-slate-400 italic">No historical records</td>
                     <td className="p-3 border-r border-slate-100 text-right pr-6 text-slate-400">0.000</td>
-                    <td className="p-3 text-right pr-6 text-slate-400">0.00%</td>
+                    <td className="p-3 text-right pr-6 text-slate-400">0.000%</td>
                   </>
                 ) : (
                   <>
                     <td className="p-3 border-r border-slate-100 text-left pl-6 text-slate-500">{cargoVarietyStats.domestic.items[0].name}</td>
                     <td className="p-3 border-r border-slate-100 text-right pr-6 font-mono text-slate-600">{formatNum(cargoVarietyStats.domestic.items[0].weight)}</td>
-                    <td className="p-3 text-right pr-6 text-fab-cyan font-bold">{cargoVarietyStats.domestic.items[0].percentage.toFixed(2)}%</td>
+                    <td className="p-3 text-right pr-6 text-fab-cyan font-bold">{cargoVarietyStats.domestic.items[0].percentage.toFixed(3)}%</td>
                   </>
                 )}
               </tr>
@@ -836,13 +887,13 @@ export const StatisticsDashboard: React.FC<StatisticsDashboardProps> = ({ data, 
                 >
                   <td className="p-3 border-r border-slate-100 text-left pl-6 text-slate-500">{item.name}</td>
                   <td className="p-3 border-r border-slate-100 text-right pr-6 font-mono text-slate-600">{formatNum(item.weight)}</td>
-                  <td className="p-3 text-right pr-6 text-fab-cyan font-bold">{item.percentage.toFixed(2)}%</td>
+                  <td className="p-3 text-right pr-6 text-fab-cyan font-bold">{item.percentage.toFixed(3)}%</td>
                 </tr>
               ))}
               <tr className="bg-slate-100/50 font-black border-b-2 border-fab-cyan/20">
                 <td className="p-3 border-r border-slate-100 text-left pl-6 italic text-fab-cyan">DOMAIN TOTAL</td>
                 <td className="p-3 border-r border-slate-100 text-right pr-6 text-fab-blue">{formatNum(cargoVarietyStats.domestic.subTotalWeight)}</td>
-                <td className="p-3 text-right pr-6 text-fab-blue">{cargoVarietyStats.domestic.subTotalPercentage.toFixed(2)}%</td>
+                <td className="p-3 text-right pr-6 text-fab-blue">{cargoVarietyStats.domestic.subTotalPercentage.toFixed(3)}%</td>
               </tr>
 
               {/* FOREIGN SECTION */}
@@ -862,13 +913,13 @@ export const StatisticsDashboard: React.FC<StatisticsDashboardProps> = ({ data, 
                   <>
                     <td className="p-3 border-r border-slate-100 text-left pl-6 text-slate-400 italic">No historical records</td>
                     <td className="p-3 border-r border-slate-100 text-right pr-6 text-slate-400">0.000</td>
-                    <td className="p-3 text-right pr-6 text-slate-400">0.00%</td>
+                    <td className="p-3 text-right pr-6 text-slate-400">0.000%</td>
                   </>
                 ) : (
                   <>
                     <td className="p-3 border-r border-slate-100 text-left pl-6 text-slate-500">{cargoVarietyStats.foreign.items[0].name}</td>
                     <td className="p-3 border-r border-slate-100 text-right pr-6 font-mono text-slate-600">{formatNum(cargoVarietyStats.foreign.items[0].weight)}</td>
-                    <td className="p-3 text-right pr-6 text-fab-gold font-bold">{cargoVarietyStats.foreign.items[0].percentage.toFixed(2)}%</td>
+                    <td className="p-3 text-right pr-6 text-fab-gold font-bold">{cargoVarietyStats.foreign.items[0].percentage.toFixed(3)}%</td>
                   </>
                 )}
               </tr>
@@ -880,20 +931,20 @@ export const StatisticsDashboard: React.FC<StatisticsDashboardProps> = ({ data, 
                 >
                   <td className="p-3 border-r border-slate-100 text-left pl-6 text-slate-500">{item.name}</td>
                   <td className="p-3 border-r border-slate-100 text-right pr-6 font-mono text-slate-600">{formatNum(item.weight)}</td>
-                  <td className="p-3 text-right pr-6 text-fab-gold font-bold">{item.percentage.toFixed(2)}%</td>
+                  <td className="p-3 text-right pr-6 text-fab-gold font-bold">{item.percentage.toFixed(3)}%</td>
                 </tr>
               ))}
               <tr className="bg-slate-100/50 font-black border-b-2 border-fab-blue/20">
                 <td className="p-3 border-r border-slate-100 text-left pl-6 italic text-fab-blue">COMMERCE TOTAL</td>
                 <td className="p-3 border-r border-slate-100 text-right pr-6 text-fab-gold">{formatNum(cargoVarietyStats.foreign.subTotalWeight)}</td>
-                <td className="p-3 text-right pr-6 text-fab-gold">{cargoVarietyStats.foreign.subTotalPercentage.toFixed(2)}%</td>
+                <td className="p-3 text-right pr-6 text-fab-gold">{cargoVarietyStats.foreign.subTotalPercentage.toFixed(3)}%</td>
               </tr>
 
               {/* GRAND TOTAL */}
               <tr className="bg-fab-blue text-white font-black uppercase tracking-wider text-[11px] shadow-inner">
                 <td className="p-4 border-r border-white/10 text-left" colSpan={2}>Aggregate Global Cargo Volume</td>
                 <td className="p-4 border-r border-white/10 text-right pr-6 text-fab-gold font-bold">{formatNum(cargoVarietyStats.grandTotalWeight)}</td>
-                <td className="p-4 text-right pr-6">100.00%</td>
+                <td className="p-4 text-right pr-6">100.000%</td>
               </tr>
             </tbody>
           </table>
@@ -909,11 +960,11 @@ export const StatisticsDashboard: React.FC<StatisticsDashboardProps> = ({ data, 
           <table className="w-full text-center font-sans border-collapse">
             <thead>
               <tr className="bg-slate-50/50 text-[10px] font-bold uppercase border-b border-slate-200 text-slate-500">
-                <th className="p-4 border-r border-slate-100 text-left w-1/4">Voyage Category</th>
+                <th className="p-4 border-r border-slate-100 text-left w-1/4">Voyage Type</th>
                 <th className="p-4 border-r border-slate-100 w-32">Vessel Calls</th>
-                <th className="p-4 border-r border-slate-100 w-48">Average Volume (MT)</th>
-                <th className="p-4 border-r border-slate-100 w-48">Avg Berth Stay (Days)</th>
-                <th className="p-4 w-64">Avg Productivity (MT/Day)</th>
+                <th className="p-4 border-r border-slate-100 w-48">Average Volume Exchange (MT)</th>
+                <th className="p-4 border-r border-slate-100 w-48 font-semibold">Average of Berth Time - Days</th>
+                <th className="p-4 w-64">Average Gross Berth Productivity (MT/Day)</th>
               </tr>
             </thead>
             <tbody className="text-[11px] uppercase font-medium">
@@ -921,7 +972,7 @@ export const StatisticsDashboard: React.FC<StatisticsDashboardProps> = ({ data, 
                 className="border-b border-slate-50 hover:bg-slate-50 transition-colors cursor-pointer"
                 onClick={() => handleRowClick('Foreign Commercial Calls', v => v.orientation === 'Foreign' && v.status?.toUpperCase() === 'DEPARTED')}
               >
-                <td className="p-4 border-r border-slate-100 text-left font-bold text-fab-blue bg-fab-blue/5">FOREIGN COMMERCIAL</td>
+                <td className="p-4 border-r border-slate-100 text-left font-bold text-fab-blue bg-fab-blue/5">FOREIGN</td>
                 <td className="p-4 border-r border-slate-100 text-slate-600 font-bold">{formatInt(productivityStats.foreign.calls)}</td>
                 <td className="p-4 border-r border-slate-100 text-slate-500">{formatDec(productivityStats.foreign.avgVolume)}</td>
                 <td className="p-4 border-r border-slate-100 text-slate-500">{formatDec(productivityStats.foreign.avgBerthTime)}</td>
@@ -931,14 +982,14 @@ export const StatisticsDashboard: React.FC<StatisticsDashboardProps> = ({ data, 
                 className="border-b border-slate-50 hover:bg-slate-50 transition-colors cursor-pointer"
                 onClick={() => handleRowClick('Domestic Commercial Calls', v => v.orientation === 'Domestic' && v.status?.toUpperCase() === 'DEPARTED')}
               >
-                <td className="p-4 border-r border-slate-100 text-left font-bold text-fab-cyan bg-fab-cyan/5">DOMESTIC COVETED</td>
+                <td className="p-4 border-r border-slate-100 text-left font-bold text-fab-cyan bg-fab-cyan/5">DOMESTIC</td>
                 <td className="p-4 border-r border-slate-100 text-slate-600 font-bold">{formatInt(productivityStats.domestic.calls)}</td>
                 <td className="p-4 border-r border-slate-100 text-slate-500">{formatDec(productivityStats.domestic.avgVolume)}</td>
                 <td className="p-4 border-r border-slate-100 text-slate-500">{formatDec(productivityStats.domestic.avgBerthTime)}</td>
                 <td className="p-4 font-extrabold text-fab-cyan">{formatDec(productivityStats.domestic.avgProductivity)}</td>
               </tr>
               <tr className="bg-fab-blue text-white font-black uppercase tracking-wider text-[11px] shadow-inner">
-                <td className="p-4 border-r border-white/10 text-left">Systems Aggregate Performance</td>
+                <td className="p-4 border-r border-white/10 text-left">Grand Total</td>
                 <td className="p-4 border-r border-white/10">{formatInt(productivityStats.grandTotal.calls)}</td>
                 <td className="p-4 border-r border-white/10">{formatDec(productivityStats.grandTotal.avgVolume)}</td>
                 <td className="p-4 border-r border-white/10">{formatDec(productivityStats.grandTotal.avgBerthTime)}</td>
@@ -1118,7 +1169,7 @@ export const StatisticsDashboard: React.FC<StatisticsDashboardProps> = ({ data, 
                                {v.status}
                              </span>
                            </td>
-                           <td className="p-4 text-slate-400 font-mono italic">{v.arrivalDate}</td>
+                           <td className="p-4 text-slate-400 font-mono italic">{formatSystemDate(v.arrivalDate)}</td>
                          </tr>
                        ))}
                      </tbody>

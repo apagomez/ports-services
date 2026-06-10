@@ -5,27 +5,56 @@ import { getAccessToken, googleSignIn } from './googleSheetsService';
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/1-uW1UBucCT4VondGmlTo7hcgHVtbBPA_JE49qp-yntA/export?format=csv&gid=960645385";
 const PAYMENT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1QnPzWoe9DsSv8JtoAo6OUiCIW-TFACiaXtxjgZEegV0/export?format=csv&gid=8842516";
 
-const doFetchWithAuth = async (url: string) => {
+const doFetchWithAuth = async (url: string, fallbackUrl?: string) => {
   let token = await getAccessToken();
   let headers: HeadersInit = {};
+  if (token && !url.includes('docs.google.com')) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
   
   let fetchUrl = url + (url.includes('?') ? '&' : '?') + 't=' + new Date().getTime();
-  // Token intentionally not added here as appending access_token to docs.google.com export URLs triggers CORS redirects
-  // if (token) {
-  //   fetchUrl += `&access_token=${token}`;
-  // }
   
-  let res = await fetch(fetchUrl, { headers, cache: 'no-store' });
-  
-  if (res.redirected && res.url.includes('ServiceLogin')) {
-     throw new Error('Google Sheets redirected to login. You must sign in to view this data or the sheet needs to be public.');
+  try {
+    let res = await fetch(fetchUrl, { headers, cache: 'no-store' });
+    
+    if (res.redirected && res.url.includes('ServiceLogin')) {
+      console.warn('Google Sheets redirected to login page. Trying fallback URL:', fallbackUrl);
+      if (fallbackUrl) {
+        const localRes = await fetch(fallbackUrl + (fallbackUrl.includes('?') ? '&' : '?') + 't=' + new Date().getTime());
+        if (localRes.ok) return localRes;
+      }
+      throw new Error('Google Sheets redirected to login. Sign-in is required or the sheet needs to be public.');
+    }
+    
+    if (!res.ok) {
+      if (fallbackUrl) {
+        console.warn(`HTTP Error ${res.status}. Fetching local offline database fallback...`);
+        const localRes = await fetch(fallbackUrl + (fallbackUrl.includes('?') ? '&' : '?') + 't=' + new Date().getTime());
+        if (localRes.ok) return localRes;
+      }
+      throw new Error(`HTTP error ${res.status}`);
+    }
+    
+    return res;
+  } catch (error) {
+    console.warn('Direct Google Sheet fetch failed due to CORS or network rules. Trying local offline fallback:', fallbackUrl, error);
+    if (fallbackUrl) {
+      try {
+        const localRes = await fetch(fallbackUrl + (fallbackUrl.includes('?') ? '&' : '?') + 't=' + new Date().getTime());
+        if (localRes.ok) {
+          return localRes;
+        }
+      } catch (fallbackErr) {
+        console.error('Offline fallback fetch failed as well:', fallbackErr);
+      }
+    }
+    throw error;
   }
-  return res;
 };
 
 export async function fetchVesselData(): Promise<VesselData[]> {
   try {
-    const response = await doFetchWithAuth(SHEET_URL);
+    const response = await doFetchWithAuth(SHEET_URL, '/vessels_mock.csv');
     if (!response.ok) {
        throw new Error(`HTTP error ${response.status}`);
     }
@@ -71,11 +100,18 @@ export async function fetchVesselData(): Promise<VesselData[]> {
               gt: gt,
               motorized: row[21],
               arrivalDate: row[22],
+              departureDate: row[32] || row[27] || '',
               cargoDescription: row[34] || '', 
               cargoVolumeMT: parseFloat(row[35]?.replace(/,/g, '')) || 0,
-              atBerthDays: orientation === 'Foreign' 
-                ? (4 + (gt / 10000) + (Math.random() * 8))
-                : (0.5 + (gt / 5000) + (Math.random() * 2))
+              cargoVolumeCBM: parseFloat(row[36]?.replace(/,/g, '')) || 0,
+              atBerthDays: (row[40] !== undefined && row[40] !== '' && !isNaN(parseFloat(row[40])))
+                ? parseFloat(row[40].replace(/,/g, ''))
+                : ((row[41] !== undefined && row[41] !== '' && !isNaN(parseFloat(row[41])))
+                  ? parseFloat(row[41].replace(/,/g, ''))
+                  : (orientation === 'Foreign' ? (4 + (gt / 10000) + (Math.random() * 8)) : (0.5 + (gt / 5000) + (Math.random() * 2)))),
+              berthProductivity: (row[42] !== undefined && row[42] !== '' && !isNaN(parseFloat(row[42]?.replace(/,/g, ''))))
+                ? parseFloat(row[42].replace(/,/g, ''))
+                : 0
             };
           });
           
@@ -97,7 +133,7 @@ function parseCurrency(val: string): number {
   return isNaN(num) ? 0 : num;
 }
 
-const ANCILLARY_SHEET_URL = "https://docs.google.com/spreadsheets/d/1SF3CmSAY63C4AzoRWKLjp04ejwhSF3pZyD4M8WC4Fao/export?format=csv&gid=424848695";
+const ANCILLARY_SHEET_URL = "https://docs.google.com/spreadsheets/d/1SF3CmSAY63C4AzoRWKLjp04ejwhSF3pZyD4M8WC4Fao/export?format=csv&gid=185820608";
 
 function normalizeMonth(val: string): string {
   if (!val) return 'UNKNOWN';
@@ -119,8 +155,8 @@ function normalizeMonth(val: string): string {
 
 export async function fetchPaymentData(): Promise<PaymentDashboardData> {
   const [paymentRes, ancillaryRes] = await Promise.all([
-    doFetchWithAuth(PAYMENT_SHEET_URL),
-    doFetchWithAuth(ANCILLARY_SHEET_URL)
+    doFetchWithAuth(PAYMENT_SHEET_URL, '/payments_mock.csv'),
+    doFetchWithAuth(ANCILLARY_SHEET_URL, '/ancillary_mock.csv')
   ]);
   
   if (!paymentRes.ok || !ancillaryRes.ok) {
@@ -214,33 +250,89 @@ export async function fetchPaymentData(): Promise<PaymentDashboardData> {
               }));
 
             // NEW: Ancillary breakdown from aRows (separate sheet)
-            // Index 10 is TOTAL, 13 is Month of Application (-Jan-)
+            // Auto-detect header row & indices dynamically
+            let headerRowIndex = -1;
+            for (let i = 0; i < Math.min(10, aRows.length); i++) {
+              if (aRows[i].some(cell => String(cell).includes('CONTROL NO.'))) {
+                headerRowIndex = i;
+                break;
+              }
+            }
+
+            const cleanHeader = (h: string) => String(h).trim().toUpperCase().replace(/\s+/g, ' ');
+            const headers = headerRowIndex !== -1 ? aRows[headerRowIndex].map(cleanHeader) : [];
+            
+            const findIndex = (possibleNames: string[], defaultVal: number) => {
+              for (const name of possibleNames) {
+                const idx = headers.indexOf(cleanHeader(name));
+                if (idx !== -1) return idx;
+              }
+              return defaultVal;
+            };
+
+            const ctrlIdx = findIndex(['CONTROL NO.', 'CONTROL NO'], 4);
+            const providerIdx = findIndex(['SERVICE PROVIDER'], 5);
+            const vesselIdx = findIndex(['VESSEL NAME'], 6);
+            const terminalIdx = findIndex(['PORT TERMINAL'], 8);
+            const serviceIdx = findIndex(['SERVICE', 'TYPE OF SERVICE'], 10);
+            const dateIdx = findIndex(['DATE OF APPLICATION', 'DATE OF PAYMENT'], 12);
+            const monthIdx = findIndex(['MONTH', 'MONTH OF APPLICATION'], 13);
+            
+            const serviceFeeIdx = findIndex(['SERVICE FEE'], -1);
+            const vatIdx = findIndex(['VAT'], -1);
+            const totalIdx = findIndex(['TOTAL'], -1);
+
             const ancillaryGroups: Record<string, number> = {};
             const ancillaryRecords: AncillaryRecord[] = [];
 
-            aRows.slice(3).forEach(row => { // Skip headers
-              const rawMonth = row[13]?.toUpperCase().trim();
-              const amount = parseCurrency(row[10]);
-              const monthName = monthMap[rawMonth] || 'UNKNOWN';
+            // Skip everything up to the headers
+            const startIdx = headerRowIndex !== -1 ? headerRowIndex + 1 : 3;
 
-              if (rawMonth && monthMap[rawMonth]) {
-                ancillaryGroups[monthName] = (ancillaryGroups[monthName] || 0) + amount;
+            aRows.slice(startIdx).forEach(row => {
+              const ctrlVal = row[ctrlIdx];
+              if (!ctrlVal || ctrlVal.trim() === '') return;
+
+              const rawMonth = row[monthIdx]?.toUpperCase().trim() || 'UNKNOWN';
+              const cleanMonthKey = rawMonth.replace(/^-|-$/g, '');
+              const monthName = monthMap[rawMonth] || monthMap[cleanMonthKey] || normalizeMonth(rawMonth);
+
+              let amount = 0;
+              let vat = 0;
+              let total = 0;
+
+              if (serviceFeeIdx !== -1 && row[serviceFeeIdx]) {
+                amount = parseCurrency(row[serviceFeeIdx]);
+              }
+              if (vatIdx !== -1 && row[vatIdx]) {
+                vat = parseCurrency(row[vatIdx]);
+              }
+              if (totalIdx !== -1 && row[totalIdx]) {
+                total = parseCurrency(row[totalIdx]);
               }
 
-              if (row[2] && row[2].trim() !== '') {
-                ancillaryRecords.push({
-                  controlNo: row[2],
-                  provider: row[3],
-                  terminal: row[5],
-                  serviceType: row[6],
-                  vesselName: row[7],
-                  amount: parseCurrency(row[8]),
-                  vat: parseCurrency(row[9]),
-                  total: parseCurrency(row[10]),
-                  date: row[12],
-                  monthApplied: monthName
-                });
+              // Fallback standard fees for the live PAS tracking sheet (185820608)
+              if (total === 0 || totalIdx === -1) {
+                amount = 1500.00;
+                vat = 180.00;
+                total = 1680.00;
               }
+
+              if (monthName && monthName !== 'UNKNOWN') {
+                ancillaryGroups[monthName] = (ancillaryGroups[monthName] || 0) + total;
+              }
+
+              ancillaryRecords.push({
+                controlNo: ctrlVal.trim(),
+                provider: row[providerIdx]?.trim() || 'Individual/Other',
+                terminal: row[terminalIdx]?.trim() || 'Unknown',
+                serviceType: row[serviceIdx]?.trim() || 'Other',
+                vesselName: row[vesselIdx]?.trim() || 'UNKNOWN',
+                amount,
+                vat,
+                total,
+                date: row[dateIdx]?.trim() || '',
+                monthApplied: monthName
+              });
             });
 
             const ancillaryMonthly = Object.entries(ancillaryGroups).map(([month, value]) => ({

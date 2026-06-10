@@ -17,6 +17,7 @@ const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data }) => {
   const [revenueFilter, setRevenueFilter] = React.useState<'All' | 'Foreign' | 'Domestic'>('All');
   const [activeTab, setActiveTab] = React.useState<'overview' | 'ancillary'>('overview');
+  const [selectedServiceType, setSelectedServiceType] = React.useState<string | null>(null);
   
   const months = useMemo(() => [
     'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 
@@ -118,6 +119,18 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data }) => {
       count: filtered.length
     };
   }, [data.ancillaryRecords, startMonth, endMonth, months, monthToIndex]);
+
+  const filteredAncillaryRecordsByType = useMemo(() => {
+    if (!selectedServiceType) return [];
+    const startIndex = monthToIndex(startMonth);
+    const endIndex = monthToIndex(endMonth);
+
+    return data.ancillaryRecords.filter(r => {
+      const idx = monthToIndex(r.monthApplied);
+      const isWithinMonths = (idx >= startIndex && idx <= endIndex) || r.monthApplied === 'UNKNOWN';
+      return isWithinMonths && (r.serviceType || 'Other') === selectedServiceType;
+    });
+  }, [data.ancillaryRecords, selectedServiceType, startMonth, endMonth, monthToIndex]);
 
   const stats = useMemo(() => {
     const total = filteredRevenue.reduce((acc, curr) => acc + curr.total, 0);
@@ -361,7 +374,10 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data }) => {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-              <h4 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-6">Service Type Distribution</h4>
+              <div className="flex justify-between items-center mb-6">
+                <h4 className="text-sm font-bold uppercase tracking-wider text-gray-400">Service Type Distribution</h4>
+                <span className="text-[9px] font-mono select-none px-2 py-0.5 bg-purple-50 text-purple-700 rounded-sm border border-purple-100">Click a bar to inspect</span>
+              </div>
               <div className="h-[350px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={ancillaryStats.byType} layout="vertical" margin={{ left: 40, right: 80 }}>
@@ -369,7 +385,26 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data }) => {
                     <XAxis type="number" hide />
                     <YAxis dataKey="name" type="category" width={150} tick={{ fontSize: 10 }} />
                     <Tooltip formatter={(v: number) => formatCurrency(v)} />
-                    <Bar dataKey="value" fill="#8884d8" radius={[0, 4, 4, 0]}>
+                    <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                      {ancillaryStats.byType.map((entry, index) => {
+                        const isSelected = selectedServiceType === entry.name;
+                        const hasSelection = selectedServiceType !== null;
+                        const barColor = isSelected 
+                          ? '#6d28d9' 
+                          : hasSelection 
+                            ? '#e2e8f0' 
+                            : COLORS[index % COLORS.length];
+                        return (
+                          <Cell 
+                            key={`cell-${index}`} 
+                            fill={barColor}
+                            className="cursor-pointer hover:opacity-85 transition-opacity"
+                            onClick={() => {
+                              setSelectedServiceType(prev => prev === entry.name ? null : entry.name);
+                            }}
+                          />
+                        );
+                      })}
                       <LabelList dataKey="value" position="right" formatter={formatCurrencyShort} style={{ fontSize: '10px', fontWeight: 'bold' }} />
                     </Bar>
                   </BarChart>
@@ -397,6 +432,68 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data }) => {
               </div>
             </div>
           </div>
+
+          {/* Interactive Drill-down details when a service type is clicked */}
+          {selectedServiceType && (
+            <div className="bg-white border border-purple-200 rounded-xl shadow-md p-6 space-y-4 animate-in fade-in slide-in-from-top-4 duration-350">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-purple-50/70 p-4 rounded-lg border border-purple-100 gap-4">
+                <div>
+                  <h4 className="font-extrabold text-sm uppercase tracking-tight text-purple-950 flex items-center gap-2">
+                    <Landmark className="w-4 h-4 text-purple-700" />
+                    Interactive Ledger Analysis: {selectedServiceType}
+                  </h4>
+                  <p className="text-xs text-purple-700/80 mt-1 font-medium font-sans">
+                    Showing {filteredAncillaryRecordsByType.length} matched ledger logs in selected period ({startMonth} — {endMonth})
+                  </p>
+                </div>
+                <button
+                  onClick={() => setSelectedServiceType(null)}
+                  className="text-[10px] font-bold uppercase text-purple-700 bg-purple-100 hover:bg-purple-200 px-4 py-2 rounded-md transition-all cursor-pointer whitespace-nowrap select-none"
+                >
+                  Clear Selection
+                </button>
+              </div>
+
+              <div className="overflow-x-auto border border-slate-100 rounded-lg">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead className="bg-[#141414] text-white text-[10px] uppercase font-mono">
+                    <tr>
+                      <th className="p-3">Ctrl No</th>
+                      <th className="p-3">Vessel Name</th>
+                      <th className="p-3">Provider</th>
+                      <th className="p-3">Terminal</th>
+                      <th className="p-3">Date Applied</th>
+                      <th className="p-3 text-right">Base Amount</th>
+                      <th className="p-3 text-right">VAT</th>
+                      <th className="p-3 text-right">Total Fee</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {filteredAncillaryRecordsByType.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="p-8 text-center text-slate-400 font-medium font-mono">
+                          No matching records found for this service type in the chosen time window.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredAncillaryRecordsByType.map((record, idx) => (
+                        <tr key={record.controlNo + '-' + idx} className="hover:bg-slate-50/65 transition-colors">
+                          <td className="p-3 font-mono font-bold text-slate-800">{record.controlNo}</td>
+                          <td className="p-3 font-semibold uppercase">{record.vesselName || 'UNKNOWN'}</td>
+                          <td className="p-3 text-slate-600">{record.provider}</td>
+                          <td className="p-3 text-slate-500 font-mono text-[10px] uppercase">{record.terminal}</td>
+                          <td className="p-3 text-slate-500 font-mono">{record.date || record.monthApplied}</td>
+                          <td className="p-3 text-right font-mono text-slate-600">{formatCurrency(record.amount)}</td>
+                          <td className="p-3 text-right font-mono text-slate-500">{formatCurrency(record.vat)}</td>
+                          <td className="p-3 text-right font-mono font-bold text-purple-700">{formatCurrency(record.total)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="p-6 border-b border-gray-50 bg-gray-50/50">

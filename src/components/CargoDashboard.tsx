@@ -46,7 +46,7 @@ export const CargoDashboard: React.FC<CargoDashboardProps> = ({ data }) => {
     return data.filter(v => {
       // Basic cargo presence check
       const hasCargo = v.cargoDescription && v.cargoDescription.trim() !== '';
-      const hasWeight = (v.cargoVolumeMT || 0) > 0;
+      const hasWeight = (v.cargoVolumeMT || 0) > 0 || (v.cargoVolumeCBM || 0) > 0;
       
       if (!hasCargo || !hasWeight) return false;
 
@@ -68,6 +68,10 @@ export const CargoDashboard: React.FC<CargoDashboardProps> = ({ data }) => {
     return filteredData.reduce((acc, curr) => acc + (curr.cargoVolumeMT || 0), 0);
   }, [filteredData]);
 
+  const totalVolumeCBM = useMemo(() => {
+    return filteredData.reduce((acc, curr) => acc + (curr.cargoVolumeCBM || 0), 0);
+  }, [filteredData]);
+
   const [expandedStat, setExpandedStat] = useState<string | null>(null);
 
   const cargoStats = useMemo(() => {
@@ -75,7 +79,7 @@ export const CargoDashboard: React.FC<CargoDashboardProps> = ({ data }) => {
     filteredData.forEach(v => {
       const type = v.cargoDescription || 'OTHER/UNSPECIFIED';
       if (!statsDetail[type]) statsDetail[type] = { volume: 0, count: 0 };
-      statsDetail[type].volume += (v.cargoVolumeMT || 0);
+      statsDetail[type].volume += (v.cargoVolumeMT || v.cargoVolumeCBM || 0);
       statsDetail[type].count += 1;
     });
     return Object.entries(statsDetail)
@@ -84,16 +88,16 @@ export const CargoDashboard: React.FC<CargoDashboardProps> = ({ data }) => {
   }, [filteredData]);
 
   const stats = useMemo(() => {
-    const totalVolume = totalVolumeMT;
     const uniqueCargoTypes = new Set(filteredData.map(v => v.cargoDescription).filter(Boolean)).size;
-    const avgVolume = filteredData.length > 0 ? totalVolume / filteredData.length : 0;
+    const avgVolumeMT = filteredData.length > 0 ? totalVolumeMT / filteredData.length : 0;
+    const avgVolumeCBM = filteredData.length > 0 ? totalVolumeCBM / filteredData.length : 0;
     
     return [
-      { label: 'Total Volume (MT)', value: totalVolume.toLocaleString(), icon: Scale, color: 'text-blue-600', bg: 'bg-blue-100', clickable: false },
+      { label: 'Total Volume (MT / CBM)', value: `${totalVolumeMT.toLocaleString()} MT / ${totalVolumeCBM.toLocaleString()} CBM`, icon: Scale, color: 'text-blue-600', bg: 'bg-blue-100', clickable: false },
       { label: 'Cargo Varieties', value: uniqueCargoTypes, icon: Boxes, color: 'text-orange-600', bg: 'bg-orange-100', clickable: true, id: 'varieties' },
-      { label: 'Avg Cargo/Vessel', value: Math.round(avgVolume).toLocaleString() + ' MT', icon: Package, color: 'text-green-600', bg: 'bg-green-100', clickable: false },
+      { label: 'Avg Cargo/Vessel', value: `${Math.round(avgVolumeMT).toLocaleString()} MT / ${Math.round(avgVolumeCBM).toLocaleString()} CBM`, icon: Package, color: 'text-green-600', bg: 'bg-green-100', clickable: false },
     ];
-  }, [filteredData, totalVolumeMT]);
+  }, [filteredData, totalVolumeMT, totalVolumeCBM]);
 
   const cargoByType = useMemo(() => {
     return cargoStats.slice(0, 8).map(s => ({ name: s.name, value: s.volume }));
@@ -113,7 +117,7 @@ export const CargoDashboard: React.FC<CargoDashboardProps> = ({ data }) => {
     filteredData.forEach(v => {
       const m = v.month.toUpperCase();
       if (dataByMonth[m]) {
-        dataByMonth[m].volume += (v.cargoVolumeMT || 0);
+        dataByMonth[m].volume += (v.cargoVolumeMT || v.cargoVolumeCBM || 0);
         dataByMonth[m].count += 1;
       }
     });
@@ -322,7 +326,7 @@ export const CargoDashboard: React.FC<CargoDashboardProps> = ({ data }) => {
                 <th className="p-3 font-mono text-[10px] tracking-widest border-r border-[#E4E3E022]">ID</th>
                 <th className="p-3 font-bold border-r border-[#E4E3E022]">Vessel</th>
                 <th className="p-3 border-r border-[#E4E3E022]">Cargo Description</th>
-                <th className="p-3 border-r border-[#E4E3E022]">Weight (MT)</th>
+                <th className="p-3 border-r border-[#E4E3E022]">Volume (MT/CBM)</th>
                 <th className="p-3">Type</th>
               </tr>
               <tr className="bg-gray-50 border-b border-[#141414]">
@@ -376,7 +380,13 @@ export const CargoDashboard: React.FC<CargoDashboardProps> = ({ data }) => {
                   <td className="p-3 font-mono opacity-50 border-r border-gray-100">{v.controlNo}</td>
                   <td className="p-3 font-bold border-r border-gray-100">{v.vesselName}</td>
                   <td className="p-3 border-r border-gray-100">{v.cargoDescription || 'N/A'}</td>
-                  <td className="p-3 font-mono border-r border-gray-100">{(v.cargoVolumeMT || 0).toLocaleString()}</td>
+                  <td className="p-3 font-mono border-r border-gray-100 text-right">
+                    {v.cargoVolumeCBM && v.cargoVolumeCBM > 0 ? (
+                      <span className="text-amber-600 font-bold">{Math.round(v.cargoVolumeCBM).toLocaleString()}<span className="text-[10px] text-slate-400 ml-1 font-normal select-none">CBM</span></span>
+                    ) : v.cargoVolumeMT && v.cargoVolumeMT > 0 ? (
+                      <span>{Math.round(v.cargoVolumeMT).toLocaleString()}<span className="text-[10px] text-slate-400 ml-1 font-normal select-none">MT</span></span>
+                    ) : '-'}
+                  </td>
                   <td className="p-3">
                     <span className={cn(
                       "px-2 py-0.5 rounded-sm text-[10px] block text-center",
@@ -391,7 +401,10 @@ export const CargoDashboard: React.FC<CargoDashboardProps> = ({ data }) => {
             <tfoot className="sticky bottom-0 bg-[#141414] text-[#E4E3E0] z-10 font-mono text-[10px] uppercase">
               <tr>
                 <td colSpan={3} className="p-3 text-right font-bold tracking-widest">Total Filtered Cargo Weight:</td>
-                <td className="p-3 font-bold text-sm">{totalVolumeMT.toLocaleString()} MT</td>
+                <td className="p-3 font-bold text-sm">
+                  {totalVolumeMT.toLocaleString()} MT
+                  {totalVolumeCBM > 0 && ` / ${totalVolumeCBM.toLocaleString()} CBM`}
+                </td>
                 <td></td>
               </tr>
             </tfoot>

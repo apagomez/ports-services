@@ -23,9 +23,12 @@ export interface VesselData {
   gt: number;
   motorized: string;
   arrivalDate: string;
+  departureDate: string;
   cargoDescription: string;
   cargoVolumeMT: number;
+  cargoVolumeCBM: number;
   atBerthDays: number;
+  berthProductivity?: number;
 }
 
 export interface SummaryStats {
@@ -37,6 +40,8 @@ export interface SummaryStats {
   arriving: number;
   vesselTypes: Record<string, number>;
   registries: Record<string, number>;
+  flaggedCount?: number;
+  criticalCount?: number;
 }
 
 export interface MonthlyRevenue {
@@ -98,8 +103,25 @@ export interface VesselApplication {
   vesselOperations?: string;
   terminal?: string;
   cargoDescription?: string;
-  status: 'Pending' | 'Approved' | 'Rejected';
+  status: 'Pending' | 'Pending Check' | 'Pending Approval' | 'Approved' | 'Rejected';
+  applicationType?: 'VEP' | 'PAS';
+  serviceProviderName?: string;
+  serviceBusinessAddress?: string;
+  serviceContactNo?: string;
+  selectedServices?: string[];
+  otherServiceSpecify?: string;
+  detailsOfService?: string;
+  validity?: string;
   userEmail?: string;
+  submitterName?: string;
+  signatureType?: 'upload' | 'draw';
+  signatureData?: string;
+  checkedByName?: string;
+  checkedAt?: string;
+  checkedSignatureData?: string;
+  approvedByName?: string;
+  approvedAt?: string;
+  approvedSignatureData?: string;
 }
 
 export interface PaymentDashboardData {

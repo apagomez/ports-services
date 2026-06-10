@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Ship, 
@@ -21,7 +21,11 @@ import {
   LayoutDashboard,
   PlusCircle,
   LogOut,
-  FileText
+  FileText,
+  ShieldAlert,
+  AlertTriangle,
+  Info,
+  AlertCircle
 } from 'lucide-react';
 import {
   PieChart,
@@ -31,6 +35,8 @@ import {
   Tooltip,
   BarChart,
   Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -39,19 +45,30 @@ import {
 import { fetchVesselData, fetchPaymentData } from './services/dataService';
 import { VesselData, SummaryStats, PaymentDashboardData, VesselApplication } from './types';
 import { cn } from './lib/utils';
+import { detectVesselAnomalies } from './utils/anomalyDetector';
 import { PaymentDashboard } from './components/PaymentDashboard';
 import { CargoDashboard } from './components/CargoDashboard';
 import { StatisticsDashboard } from './components/StatisticsDashboard';
 import { LoginForm } from './components/LoginForm';
 import { UserDashboard } from './components/UserDashboard';
 import { ApplicationDashboard } from './components/ApplicationDashboard';
-import { initAuth, logout as googleLogout } from './services/googleSheetsService';
+import { formatSystemDate } from './utils/dateFormatter';
+import { initAuth, logout as googleLogout, googleSignIn, getAccessToken, appendApplicationToSheet } from './services/googleSheetsService';
 
 const COLORS = ['#E44D26', '#F16529', '#264DE4', '#2965F1', '#4D4D4D', '#141414', '#555'];
 
+const safeAlert = (message: string) => {
+  console.log("[Alert Message]:", message);
+  try {
+    window.alert(message);
+  } catch (e) {
+    console.warn("[SafeAlert] Browser standard alert() blocked in sandboxed iframe environment:", message, e);
+  }
+};
+
 export default function App() {
-  const [authRole, setAuthRole] = useState<'admin' | 'user' | null>(null);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [authRole, setAuthRole] = useState<'admin' | 'user' | 'checker' | 'approver' | null>(() => (localStorage.getItem('auth_role') as any) || null);
+  const [userEmail, setUserEmail] = useState<string | null>(() => localStorage.getItem('auth_email') || null);
   
   const [data, setData] = useState<VesselData[]>([]);
   const [paymentData, setPaymentData] = useState<PaymentDashboardData | null>(null);
@@ -114,10 +131,27 @@ export default function App() {
   const [selectedVessel, setSelectedVessel] = useState<VesselData | null>(null);
   const [filterType, setFilterType] = useState<string>('All');
   const [filterVoyage, setFilterVoyage] = useState<string>('All');
-  const [filterMonth, setFilterMonth] = useState<string>('All');
+  const [filterAnomaly, setFilterAnomaly] = useState<string>('All');
+  const monthsList = useMemo(() => [
+    'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 
+    'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'
+  ], []);
+  const [startMonth, setStartMonth] = useState<string>('JANUARY');
+  const [endMonth, setEndMonth] = useState<string>('DECEMBER');
   const [activeTab, setActiveTab] = useState<'vessels' | 'payments' | 'cargo' | 'stats' | 'applications'>('vessels');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 768 && activeTab === 'stats') {
+        setActiveTab('vessels');
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, [activeTab]);
 
   const [colFilters, setColFilters] = useState({
     id: '',
@@ -128,39 +162,90 @@ export default function App() {
     loadVolume: '',
     cargoDesc: '',
     status: 'All',
-    arrival: ''
+    arrival: '',
+    departure: ''
   });
 
+  const [googleUser, setGoogleUser] = useState<any>(null);
+  const [googleToken, setGoogleToken] = useState<string | null>(null);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(true);
+
   useEffect(() => {
-    initAuth();
+    setIsGoogleLoading(true);
+    const unsubscribe = initAuth(
+      (user, token) => {
+        setGoogleUser(user);
+        setGoogleToken(token);
+        setIsGoogleLoading(false);
+      },
+      () => {
+        setGoogleUser(null);
+        setGoogleToken(null);
+        setIsGoogleLoading(false);
+      }
+    );
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    };
   }, []);
+
+  const handleGoogleSignIn = async () => {
+    try {
+      const res = await googleSignIn();
+      if (res) {
+        setGoogleUser(res.user);
+        setGoogleToken(res.accessToken);
+        alert(`Successfully connected Google Sheets account: ${res.user.email}`);
+      }
+    } catch (error: any) {
+      if (error?.code === 'auth/popup-closed-by-user' || error?.message?.includes('popup-closed-by-user') || error?.code === 'auth/cancelled-popup-request') {
+        console.log('User cancelled Google Sheets connection popup.');
+        return;
+      }
+      console.error('Google Sheets auth failed:', error);
+      alert(`Google Connection Failed: ${error.message}`);
+    }
+  };
+
+  const handleGoogleLogout = async () => {
+    try {
+      await googleLogout();
+      setGoogleUser(null);
+      setGoogleToken(null);
+      alert('Google Sheets account unlinked.');
+    } catch (error: any) {
+      console.error('Google Sheets sign out failed:', error);
+    }
+  };
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, filterType, filterVoyage, filterMonth, colFilters]);
+  }, [search, filterType, filterVoyage, startMonth, endMonth, filterAnomaly, colFilters]);
+
+  const fetchData = useCallback(async (isInitial = false) => {
+    if (!authRole) return; // Don't fetch until logged in
+    if (!isInitial) setIsSyncing(true);
+    try {
+      const [vesselData, payments] = await Promise.all([
+        fetchVesselData(),
+        fetchPaymentData()
+      ]);
+      setData(vesselData);
+      setPaymentData(payments);
+      setLastUpdated(new Date());
+      setFetchError(null);
+    } catch (error: any) {
+      console.error('Fetch failed:', error);
+      setFetchError(error.message || 'Failed to connect to Google Sheets');
+    } finally {
+      if (isInitial) setLoading(false);
+      setIsSyncing(false);
+    }
+  }, [authRole]);
 
   useEffect(() => {
-    const fetchData = async (isInitial = false) => {
-      if (!authRole) return; // Don't fetch until logged in
-      if (!isInitial) setIsSyncing(true);
-      try {
-        const [vesselData, payments] = await Promise.all([
-          fetchVesselData(),
-          fetchPaymentData()
-        ]);
-        setData(vesselData);
-        setPaymentData(payments);
-        setLastUpdated(new Date());
-        setFetchError(null);
-      } catch (error: any) {
-        console.error('Initial fetch failed:', error);
-        setFetchError(error.message || 'Failed to connect to Google Sheets');
-      } finally {
-        if (isInitial) setLoading(false);
-        setIsSyncing(false);
-      }
-    };
-
     if (authRole !== null) {
       // Initial fetch
       fetchData(true);
@@ -172,7 +257,7 @@ export default function App() {
 
       return () => clearInterval(interval);
     }
-  }, [authRole]);
+  }, [authRole, fetchData]);
 
   const filteredData = useMemo(() => {
     return data.filter(v => {
@@ -180,7 +265,23 @@ export default function App() {
                           v.controlNo.toLowerCase().includes(search.toLowerCase());
       const matchesType = filterType === 'All' || v.vesselType === filterType;
       const matchesVoyage = filterVoyage === 'All' || v.voyageType === filterVoyage;
-      const matchesMonth = filterMonth === 'All' || v.month === filterMonth;
+      
+      const vMonthIdx = v.month ? monthsList.indexOf(v.month.trim().toUpperCase()) : -1;
+      const startIdx = monthsList.indexOf(startMonth.toUpperCase());
+      const endIdx = monthsList.indexOf(endMonth.toUpperCase());
+      const matchesMonth = vMonthIdx >= startIdx && vMonthIdx <= endIdx;
+
+      // Anomaly checks
+      const anomalies = detectVesselAnomalies(v);
+      const hasAnomalies = anomalies.length > 0;
+      const hasErrors = anomalies.some(a => a.level === 'error');
+      const hasWarnings = anomalies.some(a => a.level === 'warning');
+
+      const matchesAnomaly = filterAnomaly === 'All' ||
+        (filterAnomaly === 'Anomalies' && hasAnomalies) ||
+        (filterAnomaly === 'Errors' && hasErrors) ||
+        (filterAnomaly === 'Warnings' && hasWarnings) ||
+        (filterAnomaly === 'Clean' && !hasAnomalies);
 
       // Column filters
       const matchesId = v.controlNo.toLowerCase().includes(colFilters.id.toLowerCase());
@@ -188,16 +289,19 @@ export default function App() {
       const matchesOrientation = colFilters.orientation === 'All' || v.orientation === colFilters.orientation;
       const matchesColType = colFilters.type === 'All' || v.vesselType === colFilters.type;
       const matchesTerminal = colFilters.terminal === 'All' || v.terminal === colFilters.terminal;
-      const matchesLoadVolume = !colFilters.loadVolume || (v.cargoVolumeMT != null && String(Math.round(v.cargoVolumeMT)).includes(colFilters.loadVolume));
+      const matchesLoadVolume = !colFilters.loadVolume || 
+        (v.cargoVolumeMT != null && String(Math.round(v.cargoVolumeMT)).includes(colFilters.loadVolume)) ||
+        (v.cargoVolumeCBM != null && String(Math.round(v.cargoVolumeCBM)).includes(colFilters.loadVolume));
       const matchesCargoDesc = !colFilters.cargoDesc || (v.cargoDescription && v.cargoDescription.toLowerCase().includes(colFilters.cargoDesc.toLowerCase()));
       const matchesStatus = colFilters.status === 'All' || v.status === colFilters.status;
       const matchesArrival = v.arrivalDate.toLowerCase().includes(colFilters.arrival.toLowerCase());
+      const matchesDeparture = (v.departureDate || '').toLowerCase().includes(colFilters.departure.toLowerCase());
 
-      return matchesSearch && matchesType && matchesVoyage && matchesMonth &&
+      return matchesSearch && matchesType && matchesVoyage && matchesMonth && matchesAnomaly &&
              matchesId && matchesName && matchesOrientation && matchesColType &&
-             matchesTerminal && matchesLoadVolume && matchesCargoDesc && matchesStatus && matchesArrival;
+             matchesTerminal && matchesLoadVolume && matchesCargoDesc && matchesStatus && matchesArrival && matchesDeparture;
     }).sort((a, b) => b.controlNo.localeCompare(a.controlNo));
-  }, [data, search, filterType, filterVoyage, filterMonth, colFilters]);
+  }, [data, search, filterType, filterVoyage, startMonth, endMonth, filterAnomaly, colFilters, monthsList]);
 
   const arrivingVessels = useMemo(() => {
     return data
@@ -215,6 +319,9 @@ export default function App() {
     let berthed = 0;
     let arriving = 0;
 
+    let flaggedCount = 0;
+    let criticalCount = 0;
+
     filteredData.forEach(v => {
       vesselTypes[v.vesselType] = (vesselTypes[v.vesselType] || 0) + 1;
       registries[v.registry] = (registries[v.registry] || 0) + 1;
@@ -225,6 +332,14 @@ export default function App() {
       else if (status.includes('anchorage')) atAnchorage++;
       else if (status.includes('berthed')) berthed++;
       else if (status.includes('arriving') || status.includes('expected')) arriving++;
+
+      const anomalies = detectVesselAnomalies(v);
+      if (anomalies.length > 0) {
+        flaggedCount++;
+        if (anomalies.some(a => a.level === 'error')) {
+          criticalCount++;
+        }
+      }
     });
 
     return {
@@ -235,7 +350,9 @@ export default function App() {
       berthed,
       arriving,
       vesselTypes,
-      registries
+      registries,
+      flaggedCount,
+      criticalCount
     };
   }, [filteredData]);
 
@@ -250,6 +367,7 @@ export default function App() {
     // Reset all status checks and find matching status from data
     if (type === 'total') {
       setColFilters(prev => ({ ...prev, status: 'All' }));
+      setFilterAnomaly('All');
       return;
     }
 
@@ -267,10 +385,6 @@ export default function App() {
   };
 
   const uniqueVoyages = useMemo(() => Array.from(new Set(data.map(v => v.voyageType))).sort(), [data]);
-  const uniqueMonths = useMemo(() => [
-    'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 
-    'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'
-  ].filter(m => data.some(v => v.month.toUpperCase() === m)), [data]);
 
   const uniqueTypes = useMemo(() => Array.from(new Set(data.map(v => v.vesselType))).sort(), [data]);
   const uniqueTerminals = useMemo(() => Array.from(new Set(data.map(v => v.terminal))).sort(), [data]);
@@ -293,8 +407,18 @@ export default function App() {
 
   if (authRole === null) {
     return <LoginForm onLogin={(role, email) => {
+      localStorage.setItem('auth_role', role);
+      if (email) {
+        localStorage.setItem('auth_email', email);
+        setUserEmail(email);
+      } else {
+        localStorage.removeItem('auth_email');
+        setUserEmail(null);
+      }
       setAuthRole(role);
-      if (email) setUserEmail(email);
+      if (role === 'checker' || role === 'approver') {
+        setActiveTab('applications');
+      }
     }} />;
   }
 
@@ -315,28 +439,47 @@ export default function App() {
 
   if (authRole === 'user') {
     return <UserDashboard 
-      applications={applications.filter(a => a.userEmail === userEmail || a.userEmail === 'user@example.com')}
+      applications={applications.filter(a => a.userEmail === userEmail)}
+      userEmail={userEmail}
       onLogout={() => {
         setAuthRole(null);
+        setUserEmail(null);
+        localStorage.removeItem('auth_role');
+        localStorage.removeItem('auth_email');
         googleLogout();
       }} 
       onSubmitApp={async (app) => {
         try {
+          const existingApp = applications.find(a => a.id === (app as any).id);
           const fullApp = {
             ...app,
             id: (app as any).id || (app.vesselName || 'APP').replace(/\s+/g, '-').toUpperCase() + '-' + Date.now(),
             userEmail: userEmail || 'user@example.com',
-            createdAt: new Date().toISOString(),
-            status: 'Pending'
+            createdAt: existingApp ? existingApp.createdAt : new Date().toISOString(),
+            status: existingApp ? existingApp.status : 'Pending Check'
           } as VesselApplication;
 
           const { saveApplicationToFirestore } = await import('./services/firebaseService');
           await saveApplicationToFirestore(fullApp);
           
-          alert('Successfully submitted application for admin approval!');
+          if (existingApp) {
+            alert('Successfully updated your application!');
+          } else {
+            alert('Successfully submitted application! It is now routed to the Port Checker for review.');
+          }
         } catch (error: any) {
           console.error("Submission failed:", error);
           alert(`Failed to save application: ${error.message}`);
+        }
+      }}
+      onDeleteApp={async (id) => {
+        try {
+          const { deleteApplicationFromFirestore } = await import('./services/firebaseService');
+          await deleteApplicationFromFirestore(id);
+          safeAlert('Application successfully withdrawn!');
+        } catch (err: any) {
+          console.error("Failed to delete application:", err);
+          safeAlert(`Failed to delete application: ${err.message}`);
         }
       }}
       options={{ 
@@ -344,7 +487,11 @@ export default function App() {
         types: uniqueTypes, 
         terminals: uniqueTerminals,
         origins: uniqueOrigins,
-        usedControlNumbers: applications.map(a => a.id.replace(/-(F|D|P)$/, ''))
+        usedControlNumbers: [
+          ...data.map(d => (d.controlNo || '').replace(/-(F|D|P)$/i, '')),
+          ...(paymentData?.ancillaryRecords || []).map(r => (r.controlNo || '')),
+          ...applications.map(a => (a.id || '').replace(/-(F|D|P)$/i, ''))
+        ]
       }} 
     />;
   }
@@ -403,8 +550,8 @@ export default function App() {
             <button 
               onClick={() => setActiveTab('stats')}
               className={cn(
-                "px-3 md:px-4 py-1.5 text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all rounded-md flex items-center gap-2 whitespace-nowrap",
-                activeTab === 'stats' ? "bg-white text-fab-blue shadow-sm border border-slate-200 border-t-2 border-t-fab-red" : "text-slate-500 hover:text-fab-blue"
+                "hidden md:flex px-3 md:px-4 py-1.5 text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all rounded-md items-center gap-2 whitespace-nowrap",
+                activeTab === 'stats' ? "bg-white text-fab-blue shadow-sm border border-slate-200 border-t-2 border-t-fab-red flex" : "text-slate-500 hover:text-fab-blue flex"
               )}
             >
               <BarChart3 className="w-3.5 h-3.5" /> Statistics
@@ -420,11 +567,47 @@ export default function App() {
             </button>
           </nav>
           
-          <div className="flex items-center ml-2 border-l border-slate-300 pl-4">
+          <div className="flex items-center gap-3 ml-2 border-l border-slate-300 pl-4">
+            {googleUser ? (
+              <div className="flex items-center gap-1.5 text-[10px] text-green-700 bg-green-50 px-2.5 py-1 rounded border border-green-200">
+                <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                <span className="hidden lg:inline font-mono">Sheets Link: {googleUser.email}</span>
+                <span className="lg:hidden font-mono">Linked</span>
+                <button 
+                  onClick={handleGoogleLogout}
+                  className="text-red-500 hover:text-red-700 font-bold underline ml-1 cursor-pointer font-sans"
+                  title="Disconnect Google Sheets ledger account"
+                >
+                  Unlink
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={handleGoogleSignIn}
+                className="flex items-center gap-1.5 text-[10px] font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 px-2.5 py-1 rounded border border-amber-200 transition-colors shadow-xs cursor-pointer font-sans uppercase tracking-wider"
+                title="Authorizes your browser to append approved vessel permits into the Google Sheets database directly"
+              >
+                <div className="w-1.5 h-1.5 bg-amber-500 rounded-full" />
+                <span>Link Google Sheets</span>
+              </button>
+            )}
+
+            <span className={cn(
+              "text-[9px] font-bold px-2 py-1 rounded font-mono uppercase tracking-wider",
+              authRole === 'admin' ? "bg-red-100 text-red-700" :
+              authRole === 'checker' ? "bg-amber-100 text-amber-700 border border-amber-200" :
+              authRole === 'approver' ? "bg-purple-100 text-purple-700 border border-purple-200" :
+              "bg-slate-100 text-slate-700"
+            )}>
+              {authRole === 'admin' ? 'Admin' : authRole === 'checker' ? 'Port Checker' : authRole === 'approver' ? 'Port Approver' : 'User'}
+            </span>
             <button 
               onClick={() => {
                 setAuthRole(null);
-                googleLogout();
+                setUserEmail(null);
+                localStorage.removeItem('auth_role');
+                localStorage.removeItem('auth_email');
+                handleGoogleLogout();
               }}
               className="flex items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 rounded-md transition-colors font-bold uppercase tracking-wider"
             >
@@ -437,52 +620,26 @@ export default function App() {
         <div className="flex flex-wrap items-center gap-2 md:gap-4 w-full md:w-auto">
           {activeTab === 'vessels' && (
             <>
-              <div className="relative flex-1 min-w-[150px] md:w-64 group">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-fab-blue transition-colors" />
-                <input 
-                  type="text" 
-                  placeholder="SEARCH..."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 pl-10 pr-4 text-[10px] font-mono focus:outline-none focus:ring-2 focus:ring-fab-blue/20 focus:border-fab-blue transition-all uppercase placeholder:text-slate-400"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
-              <div className="flex-1 min-w-[120px] flex items-center border border-slate-200 rounded-lg bg-slate-50 px-2 py-1.5 gap-2 focus-within:border-fab-blue transition-all">
-                <Filter className="w-3 h-3 text-slate-400" />
+              <div className="flex-1 min-w-[180px] flex items-center border border-slate-200 rounded-lg bg-slate-50 px-2.5 py-1.5 gap-1 focus-within:border-fab-blue transition-all">
+                <History className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                <span className="text-[9px] font-bold uppercase text-slate-400 mr-1 select-none whitespace-nowrap">Period:</span>
                 <select 
-                  className="bg-transparent text-[10px] font-bold text-slate-600 focus:outline-none uppercase cursor-pointer w-full"
-                  value={filterType}
-                  onChange={(e) => setFilterType(e.target.value)}
+                  className="bg-transparent text-[10px] font-bold text-slate-600 focus:outline-none uppercase cursor-pointer min-w-[50px] text-center"
+                  value={startMonth}
+                  onChange={(e) => setStartMonth(e.target.value)}
                 >
-                  <option value="All">Types</option>
-                  {Object.keys(stats.vesselTypes).sort().map(t => (
-                    <option key={t} value={t}>{t}</option>
+                  {monthsList.map(m => (
+                    <option key={m} value={m}>{m.substring(0, 3)}</option>
                   ))}
                 </select>
-              </div>
-              <div className="flex-1 min-w-[120px] flex items-center border border-slate-200 rounded-lg bg-slate-50 px-2 py-1.5 gap-2 focus-within:border-fab-blue transition-all">
-                <Navigation className="w-3 h-3 text-slate-400" />
+                <span className="text-[10px] text-slate-300 font-bold px-1 select-none">—</span>
                 <select 
-                  className="bg-transparent text-[10px] font-bold text-slate-600 focus:outline-none uppercase cursor-pointer w-full"
-                  value={filterVoyage}
-                  onChange={(e) => setFilterVoyage(e.target.value)}
+                  className="bg-transparent text-[10px] font-bold text-slate-600 focus:outline-none uppercase cursor-pointer min-w-[50px] text-center"
+                  value={endMonth}
+                  onChange={(e) => setEndMonth(e.target.value)}
                 >
-                  <option value="All">Voyages</option>
-                  {uniqueVoyages.map(v => (
-                    <option key={v} value={v}>{v}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex-1 min-w-[120px] flex items-center border border-slate-200 rounded-lg bg-slate-50 px-2 py-1.5 gap-2 focus-within:border-fab-blue transition-all">
-                <History className="w-3 h-3 text-slate-400" />
-                <select 
-                  className="bg-transparent text-[10px] font-bold text-slate-600 focus:outline-none uppercase cursor-pointer w-full"
-                  value={filterMonth}
-                  onChange={(e) => setFilterMonth(e.target.value)}
-                >
-                  <option value="All">Months</option>
-                  {uniqueMonths.map(m => (
-                    <option key={m} value={m}>{m}</option>
+                  {monthsList.map(m => (
+                    <option key={m} value={m}>{m.substring(0, 3)}</option>
                   ))}
                 </select>
               </div>
@@ -520,7 +677,7 @@ export default function App() {
               className="space-y-6"
             >
               {/* Stats Grid */}
-              <section className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
+              <section className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6">
                 <StatCard 
                   label="Total Vessels" 
                   value={stats.total} 
@@ -551,6 +708,18 @@ export default function App() {
                   icon={Navigation} 
                   onClick={() => handleStatClick('arriving')}
                 />
+                <StatCard 
+                  label="Flagged Issues" 
+                  value={stats.flaggedCount || 0} 
+                  icon={ShieldAlert} 
+                  onClick={() => setFilterAnomaly(filterAnomaly === 'Anomalies' ? 'All' : 'Anomalies')}
+                  className={cn(
+                    stats.flaggedCount && stats.flaggedCount > 0 
+                      ? "border-amber-500 bg-amber-500/5 hover:border-amber-500 text-amber-600 shadow-sm" 
+                      : "opacity-60"
+                  )}
+                  trend={stats.criticalCount && stats.criticalCount > 0 ? `${stats.criticalCount} CRIT` : undefined}
+                />
               </section>
 
               {/* Full Table View */}
@@ -563,10 +732,11 @@ export default function App() {
                         <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Vessel Name</th>
                         <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Voyage Type</th>
                         <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Terminal</th>
-                        <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Load Volume MT</th>
+                        <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Load Volume (MT/CBM)</th>
                         <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Cargo Description</th>
                         <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Status</th>
-                        <th className="p-4 text-[10px] font-bold uppercase tracking-wider">Arrival</th>
+                        <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Arrival</th>
+                        <th className="p-4 text-[10px] font-bold uppercase tracking-wider">Departure</th>
                       </tr>
                       <tr className="bg-slate-50 border-b border-slate-200">
                         <td className="p-2 border-r border-slate-200">
@@ -636,7 +806,7 @@ export default function App() {
                             {uniqueStatuses.map(s => <option key={s} value={s}>{s}</option>)}
                           </select>
                         </td>
-                        <td className="p-2">
+                        <td className="p-2 border-r border-slate-200">
                           <input 
                             type="text" 
                             placeholder="ARRIVAL..." 
@@ -645,17 +815,55 @@ export default function App() {
                             onChange={(e) => setColFilters(prev => ({ ...prev, arrival: e.target.value }))}
                           />
                         </td>
+                        <td className="p-2">
+                          <input 
+                            type="text" 
+                            placeholder="DEPARTURE..." 
+                            className="w-full text-[10px] p-1.5 bg-white border border-slate-200 rounded text-fab-blue uppercase font-bold focus:outline-none focus:border-fab-blue"
+                            value={colFilters.departure}
+                            onChange={(e) => setColFilters(prev => ({ ...prev, departure: e.target.value }))}
+                          />
+                        </td>
                       </tr>
                     </thead>
                     <tbody className="text-[11px] uppercase">
-                      {paginatedData.map((v, i) => (
-                        <tr 
-                          key={`${v.controlNo}-${i}`} 
-                          className={cn("border-b border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors", i % 2 === 0 ? "bg-white" : "bg-slate-50/30")}
-                          onClick={() => setSelectedVessel(v)}
-                        >
-                          <td className="p-4 font-mono border-r border-slate-100 text-slate-400">{v.controlNo}</td>
-                          <td className="p-4 font-bold border-r border-slate-100 text-fab-blue">{v.vesselName}</td>
+                      {paginatedData.map((v, i) => {
+                        const vAnomalies = detectVesselAnomalies(v);
+                        const vHasErrors = vAnomalies.some(a => a.level === 'error');
+                        const vHasWarnings = vAnomalies.some(a => a.level === 'warning');
+                        const vHasInfos = vAnomalies.some(a => a.level === 'info');
+
+                        return (
+                          <tr 
+                            key={`${v.controlNo}-${i}`} 
+                            className={cn("border-b border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors", i % 2 === 0 ? "bg-white" : "bg-slate-50")}
+                            onClick={() => setSelectedVessel(v)}
+                          >
+                            <td className="p-4 font-mono border-r border-slate-100 text-slate-400">{v.controlNo}</td>
+                            <td className="p-4 font-bold border-r border-slate-100 text-fab-blue">
+                              <div className="flex items-center gap-1.5 justify-between">
+                                <span className="truncate max-w-[170px]">{v.vesselName}</span>
+                                {vAnomalies.length > 0 && (
+                                  <div className="flex gap-1 flex-shrink-0">
+                                    {vHasErrors && (
+                                      <span title="Critical Integrity Issue Detected" className="p-0.5 bg-red-100 rounded text-red-600">
+                                        <AlertCircle className="w-3.5 h-3.5" />
+                                      </span>
+                                    )}
+                                    {vHasWarnings && (
+                                      <span title="Operational Warning Detected" className="p-0.5 bg-amber-100 rounded text-amber-600">
+                                        <AlertTriangle className="w-3.5 h-3.5" />
+                                      </span>
+                                    )}
+                                    {vHasInfos && (
+                                      <span title="Diagnostic Notice" className="p-0.5 bg-blue-100 rounded text-blue-600">
+                                        <Info className="w-3.5 h-3.5" />
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
                           <td className="p-4 border-r border-slate-100">
                             <span className={cn(
                               "px-2 py-0.5 rounded-full text-[9px] font-bold border",
@@ -664,8 +872,14 @@ export default function App() {
                               {v.orientation}
                             </span>
                           </td>
-                          <td className="p-4 border-r border-slate-100 text-slate-600 italic font-medium">{v.terminal}</td>
-                          <td className="p-4 border-r border-slate-100 text-right font-mono text-slate-600">{v.cargoVolumeMT ? Math.round(v.cargoVolumeMT).toLocaleString() : '-'}</td>
+                          <td className="p-4 border-r border-slate-100 text-[#141414] font-medium text-right">{v.terminal}</td>
+                          <td className="p-4 border-r border-slate-100 text-right font-mono text-slate-600">
+                            {v.cargoVolumeCBM && v.cargoVolumeCBM > 0 ? (
+                              <span>{Math.round(v.cargoVolumeCBM).toLocaleString()}<span className="text-[9px] text-slate-400 ml-1 font-normal select-none">CBM</span></span>
+                            ) : v.cargoVolumeMT && v.cargoVolumeMT > 0 ? (
+                              <span>{Math.round(v.cargoVolumeMT).toLocaleString()}<span className="text-[9px] text-slate-400 ml-1 font-normal select-none">MT</span></span>
+                            ) : '-'}
+                          </td>
                           <td className="p-4 border-r border-slate-100 text-slate-600 text-[10px]">{v.cargoDescription || '-'}</td>
                           <td className="p-4 border-r border-slate-100">
                             <span className={cn(
@@ -675,9 +889,11 @@ export default function App() {
                               {v.status}
                             </span>
                           </td>
-                          <td className="p-4 text-slate-400 font-mono italic">{v.arrivalDate}</td>
+                          <td className="p-4 border-r border-slate-100 text-slate-400 font-mono italic">{formatSystemDate(v.arrivalDate)}</td>
+                          <td className="p-4 text-slate-400 font-mono italic">{v.departureDate ? formatSystemDate(v.departureDate) : '-'}</td>
                         </tr>
-                      ))}
+                      );
+                    })}
                     </tbody>
                   </table>
                 </div>
@@ -793,7 +1009,7 @@ export default function App() {
                             <tr key={`${v.controlNo}-${i}`} className="hover:bg-slate-50 cursor-pointer transition-colors" onClick={() => setSelectedVessel(v)}>
                               <td className="p-3 align-top">
                                 <div className="text-fab-blue">{v.vesselName}</div>
-                                <div className="text-slate-400 font-medium font-mono lowercase tracking-tighter mt-1">{v.arrivalDate}</div>
+                                <div className="text-slate-400 font-medium font-mono lowercase tracking-tighter mt-1">{formatSystemDate(v.arrivalDate)}</div>
                               </td>
                               <td className="p-3 align-top text-right">
                                 <span className={cn(
@@ -826,32 +1042,50 @@ export default function App() {
               className="print:contents print:transform-none print:m-0 print:p-0 wrapper-print"
             >
               <ApplicationDashboard 
+                authRole={authRole as any}
                 applications={applications} 
-                onUpdateStatus={async (id, newStatus) => {
+                onUpdateStatus={async (id, newStatus, extraFields) => {
                   try {
-                    const { updateApplicationStatusInFirestore } = await import('./services/firebaseService');
-                    await updateApplicationStatusInFirestore(id, newStatus);
+                    const currentApp = applications.find(a => a.id === id);
+                    if (newStatus === 'Approved' && currentApp && currentApp.status !== 'Pending Approval') {
+                      safeAlert('Security Block: Applications must be verified by the Port Checker before they can be approved.');
+                      return;
+                    }
+
+                    let sheetSyncSuccess = false;
+                    let sheetErrorMsg = '';
+                    if (newStatus === 'Approved' && currentApp) {
+                      try {
+                        const token = await getAccessToken();
+                        if (token) {
+                          await appendApplicationToSheet({ ...currentApp, ...extraFields, status: 'Approved' });
+                          sheetSyncSuccess = true;
+                        } else {
+                          sheetErrorMsg = 'Google Sheets account is not connected. Please click "Link Google Sheets" inside the top navigation bar to activate automatic syncing.';
+                        }
+                      } catch (error: any) {
+                        console.error('Failed to append to Google Sheets during approval:', error);
+                        sheetErrorMsg = error?.message || 'Connection popup was closed or authentication failed.';
+                      }
+                    }
+
+                    const { updateApplicationInFirestore } = await import('./services/firebaseService');
+                    await updateApplicationInFirestore(id, { status: newStatus, ...extraFields });
                     
                     if (newStatus === 'Approved') {
-                      const appToApprove = applications.find(a => a.id === id);
-                      if (appToApprove) {
-                        try {
-                          const { appendApplicationToSheet } = await import('./services/googleSheetsService');
-                          await appendApplicationToSheet({ ...appToApprove, status: 'Approved' });
-                          alert('Application approved and sent to Google Sheets!');
-                        } catch (error: any) {
-                          console.error('Failed to append to Google Sheets', error);
-                          if (error.code === 'auth/popup-closed-by-user' || error.message?.includes('popup-closed-by-user')) {
-                            alert('Authentication cancelled. Could not save to Google Sheets. You may need to sign in again in a new tab.');
-                          } else {
-                            alert(`Approved in system, but failed to save to Google Sheets: ${error.message}`);
-                          }
-                        }
+                      if (sheetSyncSuccess) {
+                        safeAlert('Application approved and successfully recorded in the Google Sheets database!');
+                      } else {
+                        safeAlert(`Application approved successfully in the Portal database!\n\n(Notice: Google Sheets ledger syncing was bypassed or failed: ${sheetErrorMsg})`);
                       }
+                      // Instantly re-fetch newest rows from Google Sheets
+                      await fetchData(false);
+                    } else if (newStatus === 'Pending Check') {
+                      safeAlert('Application status reverted back to Port Checker review queue, clearing any prior officer sign-off signatures!');
                     }
                   } catch (err: any) {
                     console.error("Failed to update status", err);
-                    alert(`Failed to update status: ${err.message}`);
+                    safeAlert(`Failed to update status: ${err.message}`);
                   }
                 }} 
                 onUpdateApp={async (id, updatedApp) => {
@@ -862,9 +1096,10 @@ export default function App() {
                   try {
                     const { deleteApplicationFromFirestore } = await import('./services/firebaseService');
                     await deleteApplicationFromFirestore(id);
+                    safeAlert('Application successfully deleted!');
                   } catch (err: any) {
                     console.error("Failed to delete application:", err);
-                    alert(`Failed to delete application: ${err.message}`);
+                    safeAlert(`Failed to delete application: ${err.message}`);
                   }
                 }}
                 options={{ 
@@ -872,7 +1107,11 @@ export default function App() {
                   types: uniqueTypes, 
                   terminals: uniqueTerminals,
                   origins: uniqueOrigins,
-                  usedControlNumbers: applications.map(a => a.id.replace(/-(F|D|P)$/, ''))
+                  usedControlNumbers: [
+                    ...data.map(d => (d.controlNo || '').replace(/-(F|D|P)$/i, '')),
+                    ...(paymentData?.ancillaryRecords || []).map(r => (r.controlNo || '')),
+                    ...applications.map(a => (a.id || '').replace(/-(F|D|P)$/i, ''))
+                  ]
                 }}
               />
             </motion.div>
@@ -950,6 +1189,71 @@ export default function App() {
                 </div>
 
                 <div className="space-y-6">
+                  {/* Automated Anomaly Detection Panel */}
+                  {(() => {
+                    const vesselAnomalies = detectVesselAnomalies(selectedVessel);
+                    return (
+                      <div className="border border-[#141414] p-6 bg-white shadow-[4px_4px_0px_0px_#141414]">
+                        <h4 className="text-[10px] font-mono uppercase tracking-[0.2em] opacity-40 mb-4 flex items-center gap-2">
+                          <ShieldAlert className="w-4 h-4 text-fab-blue" /> Health Diagnostic Checks
+                        </h4>
+                        
+                        {vesselAnomalies.length === 0 ? (
+                          <div className="flex items-center gap-3 p-3 bg-green-50 border border-green-200 text-green-800 rounded-lg">
+                            <AlertCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+                            <div>
+                              <p className="text-xs font-bold uppercase tracking-wide">Vessel Health Record: Normal</p>
+                              <p className="text-[10px] opacity-75">No automated operational anomalies, data mismatches, or efficiency alerts were identified for this transit.</p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                              {vesselAnomalies.length} Automated Flag(s) Identified
+                            </div>
+                            <div className="space-y-2.5">
+                              {vesselAnomalies.map((a, idx) => {
+                                const isError = a.level === 'error';
+                                const isWarning = a.level === 'warning';
+                                return (
+                                  <div 
+                                    key={idx} 
+                                    className={cn(
+                                      "border p-3 rounded-lg flex gap-3 transition-colors",
+                                      isError ? "bg-red-50/50 border-red-200 text-red-950" :
+                                      isWarning ? "bg-amber-50/50 border-amber-200 text-amber-950" :
+                                      "bg-blue-50/50 border-blue-200 text-blue-950"
+                                    )}
+                                  >
+                                    <div className="mt-0.5 flex-shrink-0">
+                                      {isError ? <AlertCircle className="w-4 h-4 text-red-600" /> :
+                                       isWarning ? <AlertTriangle className="w-4 h-4 text-amber-600" /> :
+                                       <Info className="w-4 h-4 text-blue-600" />}
+                                    </div>
+                                    <div className="space-y-0.5 w-full">
+                                      <div className="flex items-center justify-between gap-1.5 flex-wrap w-full">
+                                        <h5 className="text-xs font-extrabold uppercase tracking-tight">{a.title}</h5>
+                                        <span className={cn(
+                                          "px-1.5 py-0.2 rounded text-[8px] font-black uppercase tracking-wider",
+                                          isError ? "bg-red-250 text-red-800" :
+                                          isWarning ? "bg-amber-250 text-amber-800" :
+                                          "bg-blue-250 text-blue-800"
+                                        )}>
+                                          {a.category}
+                                        </span>
+                                      </div>
+                                      <p className="text-[10px] leading-relaxed opacity-85">{a.message}</p>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   <div className="border border-[#141414] p-6 bg-white">
                     <h4 className="text-[10px] font-mono uppercase tracking-[0.2em] opacity-40 mb-4 flex items-center gap-2">
                        <Package className="w-3 h-3" /> Cargo Information
@@ -959,16 +1263,102 @@ export default function App() {
                         <p className="text-xs opacity-50 mb-1">Description</p>
                         <p className="font-bold text-lg uppercase tracking-tight">{selectedVessel.cargoDescription || 'NONE REPORTED'}</p>
                       </div>
-                      <div className="flex gap-8">
-                        <div>
-                          <p className="text-xs opacity-50 mb-1">Volume (MT)</p>
-                          <p className="font-mono text-xl">{selectedVessel.cargoVolumeMT.toLocaleString()}</p>
-                        </div>
+                      <div className="flex gap-8 flex-wrap">
+                        {selectedVessel.cargoVolumeMT > 0 && (
+                          <div>
+                            <p className="text-xs opacity-50 mb-1">Volume (MT)</p>
+                            <p className="font-mono text-xl">{selectedVessel.cargoVolumeMT.toLocaleString()}</p>
+                          </div>
+                        )}
+                        {selectedVessel.cargoVolumeCBM > 0 && (
+                          <div>
+                            <p className="text-xs opacity-50 mb-1">Volume (CBM)</p>
+                            <p className="font-mono text-xl text-amber-600">{selectedVessel.cargoVolumeCBM.toLocaleString()}</p>
+                          </div>
+                        )}
                         <div>
                           <p className="text-xs opacity-50 mb-1">Shipment Type</p>
                           <p className="font-mono uppercase">{selectedVessel.shipmentKind || 'N/A'}</p>
                         </div>
                       </div>
+
+                      {(() => {
+                        const parseVesselDate = (dateStr: string) => {
+                          if (!dateStr) return new Date(0);
+                          const parts = dateStr.split('-');
+                          if (parts.length === 3) {
+                            const day = parseInt(parts[0], 10);
+                            const mStr = parts[1].toLowerCase();
+                            const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+                            const monthIdx = monthNames.findIndex(m => mStr.startsWith(m));
+                            let year = parseInt(parts[2], 10);
+                            if (year < 100) year += 2000;
+                            if (monthIdx !== -1 && !isNaN(day) && !isNaN(year)) {
+                              return new Date(year, monthIdx, day);
+                            }
+                          }
+                          const parsed = new Date(dateStr);
+                          return isNaN(parsed.getTime()) ? new Date(0) : parsed;
+                        };
+
+                        const historicalVoyages = data
+                          .filter(v => v.vesselName.toLowerCase() === selectedVessel.vesselName.toLowerCase())
+                          .sort((a, b) => parseVesselDate(a.arrivalDate).getTime() - parseVesselDate(b.arrivalDate).getTime())
+                          .slice(-5)
+                          .map(v => ({
+                            voyageNo: v.voyageNo || 'N/A',
+                            volumeMT: v.cargoVolumeMT || 0,
+                            volumeCBM: v.cargoVolumeCBM || 0,
+                            label: v.voyageNo ? `V-${v.voyageNo}` : 'N/A',
+                          }));
+
+                        const hasMT = historicalVoyages.some(v => v.volumeMT > 0);
+                        const hasCBM = historicalVoyages.some(v => v.volumeCBM > 0);
+
+                        if (historicalVoyages.length === 0 || (!hasMT && !hasCBM)) return null;
+
+                        return (
+                          <div className="pt-4 border-t border-slate-100 mt-2">
+                            <p className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mb-2">Voyage Cargo History (Last 5 Voyages)</p>
+                            <div className="h-28 w-full">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={historicalVoyages} margin={{ top: 5, right: 10, left: -25, bottom: 5 }}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                                  <XAxis dataKey="label" fontSize={8} stroke="#94a3b8" />
+                                  <YAxis fontSize={8} stroke="#94a3b8" />
+                                  <Tooltip 
+                                    contentStyle={{ backgroundColor: '#141414', border: 'none', color: '#FFFFFF', fontSize: '9px', padding: '6px' }}
+                                    itemStyle={{ color: '#FFFFFF', padding: '2px 0' }}
+                                    labelStyle={{ fontWeight: 'bold', color: '#94a3b8', marginBottom: '2px' }}
+                                  />
+                                  {hasMT && (
+                                    <Line 
+                                      type="monotone" 
+                                      dataKey="volumeMT" 
+                                      name="Vol (MT)" 
+                                      stroke="#004a99" 
+                                      strokeWidth={2} 
+                                      dot={{ r: 3 }} 
+                                      activeDot={{ r: 5 }} 
+                                    />
+                                  )}
+                                  {hasCBM && (
+                                    <Line 
+                                      type="monotone" 
+                                      dataKey="volumeCBM" 
+                                      name="Vol (CBM)" 
+                                      stroke="#d97706" 
+                                      strokeWidth={2} 
+                                      dot={{ r: 3 }} 
+                                      activeDot={{ r: 5 }} 
+                                    />
+                                  )}
+                                </LineChart>
+                              </ResponsiveContainer>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
 
@@ -977,7 +1367,11 @@ export default function App() {
                     <ul className="space-y-3 font-mono text-[10px] uppercase">
                       <li className="flex justify-between border-b border-[#E4E3E022] pb-2">
                         <span className="opacity-60">Arrival Date</span>
-                        <span>{selectedVessel.arrivalDate}</span>
+                        <span>{formatSystemDate(selectedVessel.arrivalDate)}</span>
+                      </li>
+                      <li className="flex justify-between border-b border-[#E4E3E022] pb-2">
+                        <span className="opacity-60">Departure Date</span>
+                        <span>{formatSystemDate(selectedVessel.departureDate)}</span>
                       </li>
                       <li className="flex justify-between border-b border-[#E4E3E022] pb-2">
                         <span className="opacity-60">Voyage No</span>
@@ -1003,12 +1397,13 @@ export default function App() {
   );
 }
 
-function StatCard({ label, value, icon: Icon, trend, onClick }: { label: string, value: string | number, icon: any, trend?: string, onClick?: () => void }) {
+function StatCard({ label, value, icon: Icon, trend, onClick, className }: { label: string, value: string | number, icon: any, trend?: string, onClick?: () => void, className?: string }) {
   return (
     <div 
       className={cn(
         "border border-slate-200 rounded-xl p-5 bg-white hover:border-fab-blue/50 hover:shadow-xl transition-all group cursor-pointer",
-        onClick && "active:scale-95"
+        onClick && "active:scale-95",
+        className
       )}
       onClick={onClick}
     >
