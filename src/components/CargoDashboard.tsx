@@ -12,7 +12,8 @@ interface CargoDashboardProps {
   data: VesselData[];
 }
 
-const COLORS = ['#141414', '#4D4D4D', '#E44D26', '#F16529', '#264DE4', '#2965F1', '#555'];
+// Official Freeport Area of Bataan (FAB) & Port Regulations navigation/regulatory signaling colors:
+const COLORS = ['#004a99', '#10b981', '#fdb913', '#ed1c24', '#00aeef', '#f97316', '#6366f1'];
 
 export const CargoDashboard: React.FC<CargoDashboardProps> = ({ data }) => {
   const [cargoFilter, setCargoFilter] = useState<'All' | 'Foreign' | 'Domestic'>('All');

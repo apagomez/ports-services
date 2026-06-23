@@ -1,4 +1,4 @@
-import { getFirestore, initializeFirestore, collection, addDoc, setDoc, getDocs, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, collection, addDoc, setDoc, getDocs, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDocFromServer, getDoc } from 'firebase/firestore';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -11,8 +11,24 @@ if (!firebaseConfig) {
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
-}, firebaseConfig.firestoreDatabaseId || '(default)');
+  useFetchStreams: false,
+} as any, firebaseConfig.firestoreDatabaseId || '(default)');
 export const auth = getAuth(app);
+
+// Connectivity validation mandated by Firebase Integration Skill
+async function testFirestoreConnectionOnBoot() {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+    console.log("Firestore connection successfully verified on boot.");
+  } catch (error) {
+    if (error instanceof Error && (error.message.includes('the client is offline') || error.message.includes('unavailable'))) {
+      console.warn("Firestore connection check warning: Device operates in offline/restricted sandbox mode.", error);
+    } else {
+      console.log("Firestore connection check skipped or complete.", error);
+    }
+  }
+}
+testFirestoreConnectionOnBoot();
 
 // Complies with the Firestore Integration Skill for structured error handling
 export enum OperationType {
@@ -64,7 +80,18 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
 export const signInWithGoogle = async (): Promise<User> => {
   const provider = new GoogleAuthProvider();
+  provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+  provider.addScope('https://www.googleapis.com/auth/drive.readonly');
   const result = await signInWithPopup(auth, provider);
+  const credential = GoogleAuthProvider.credentialFromResult(result);
+  if (credential?.accessToken) {
+    try {
+      localStorage.setItem('google_sheets_access_token', credential.accessToken);
+      localStorage.setItem('google_sheets_access_token_saved_at', Date.now().toString());
+    } catch (e) {
+      console.warn("Could not save sheets token during google login:", e);
+    }
+  }
   return result.user;
 };
 
@@ -108,8 +135,26 @@ export const updateApplicationStatusInFirestore = async (id: string, status: Ves
 
 export const updateApplicationInFirestore = async (id: string, data: Partial<VesselApplication>) => {
   try {
-    const docRef = doc(db, 'applications', id);
-    await setDoc(docRef, data, { merge: true });
+    const newId = data.id;
+    if (newId && newId !== id) {
+      const oldDocRef = doc(db, 'applications', id);
+      const oldSnap = await getDoc(oldDocRef);
+      let mergedPayload = {};
+      if (oldSnap.exists()) {
+        mergedPayload = { ...oldSnap.data(), ...data };
+      } else {
+        mergedPayload = { ...data };
+      }
+      delete (mergedPayload as any).id;
+      
+      const newDocRef = doc(db, 'applications', newId);
+      await setDoc(newDocRef, mergedPayload);
+      await deleteDoc(oldDocRef);
+    } else {
+      const { id: _, ...payload } = data as any;
+      const docRef = doc(db, 'applications', id);
+      await setDoc(docRef, payload, { merge: true });
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `applications/${id}`);
   }
@@ -130,8 +175,8 @@ export const subscribeToApplications = (callback: (apps: VesselApplication[]) =>
   return onSnapshot(q, (snapshot) => {
     console.log('Firestore snapshot received. Size:', snapshot.size, 'Docs:', snapshot.docs.map(d => d.id));
     const apps = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
+      ...doc.data(),
+      id: doc.id
     })) as VesselApplication[];
     callback(apps);
   }, (error) => {

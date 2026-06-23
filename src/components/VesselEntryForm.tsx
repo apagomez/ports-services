@@ -1379,7 +1379,7 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
               name="vesselName"
               value={formData.vesselName}
               onChange={handleChange}
-              className="w-full bg-transparent outline-none uppercase font-bold text-black"
+              className="w-full bg-transparent outline-none uppercase font-bold text-black mt-1"
               required
             />
           </div>
@@ -1390,7 +1390,7 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
               name="agent"
               value={formData.agent || ""}
               onChange={handleChange}
-              className="w-full bg-transparent outline-none uppercase font-bold text-black"
+              className="w-full bg-transparent outline-none uppercase font-bold text-black mt-1"
               required
             />
           </div>
@@ -1400,7 +1400,7 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
               name="vesselType"
               value={formData.vesselType}
               onChange={handleChange}
-              className="w-full bg-transparent outline-none uppercase font-bold text-black cursor-pointer"
+              className="w-full bg-transparent outline-none uppercase font-bold text-black cursor-pointer mt-1"
               required
             >
               <option value="">-Select-</option>
@@ -1417,7 +1417,7 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
               name="voyageType"
               value={formData.voyageType}
               onChange={handleChange}
-              className="w-full bg-transparent outline-none uppercase font-bold text-black cursor-pointer"
+              className="w-full bg-transparent outline-none uppercase font-bold text-black cursor-pointer mt-1"
               required
             >
               <option value="">-Select-</option>
@@ -1435,14 +1435,14 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
               name="voyageNo"
               value={formData.voyageNo}
               onChange={handleChange}
-              className="w-full bg-transparent outline-none uppercase font-bold text-black"
+              className="w-full bg-transparent outline-none uppercase font-bold text-black mt-1"
               required
             />
           </div>
 
           {/* Row 2 */}
           <div className="col-span-12 md:col-span-5 border-b border-slate-800 p-2 flex flex-col md:border-r border-r-0">
-            <label className="font-bold mb-1">
+            <label className="font-bold mb-1 col-span-12">
               5. Shipping Line Company / Owner:
             </label>
             <input
@@ -1450,7 +1450,7 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
               name="shippingLine"
               value={formData.shippingLine || ""}
               onChange={handleChange}
-              className="w-full bg-transparent outline-none uppercase font-bold text-black"
+              className="w-full bg-transparent outline-none uppercase font-bold text-black mt-1"
               required
             />
           </div>
@@ -1461,7 +1461,7 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
               name="masterName"
               value={formData.masterName || ""}
               onChange={handleChange}
-              className="w-full bg-transparent outline-none uppercase font-bold text-black"
+              className="w-full bg-transparent outline-none uppercase font-bold text-black mt-1"
               required
             />
           </div>
@@ -1472,7 +1472,7 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
               name="registry"
               value={formData.registry || ""}
               onChange={handleChange}
-              className="w-full bg-transparent outline-none uppercase font-bold text-black"
+              className="w-full bg-transparent outline-none uppercase font-bold text-black mt-1"
               required
             />
           </div>
@@ -1485,7 +1485,7 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
               name="grossTonnage"
               value={formData.grossTonnage || ""}
               onChange={handleNumberChange}
-              className="w-full bg-transparent outline-none uppercase font-bold text-black"
+              className="w-full bg-transparent outline-none uppercase font-bold text-black mt-1"
               required
             />
           </div>
@@ -1496,7 +1496,7 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
               name="loa"
               value={formData.loa || ""}
               onChange={handleNumberChange}
-              className="w-full bg-transparent outline-none uppercase font-bold text-black"
+              className="w-full bg-transparent outline-none uppercase font-bold text-black mt-1"
               required
             />
           </div>
@@ -1511,25 +1511,23 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
                 </span>
               )}
             </label>
-            <div className="mt-1">
-              <input
-                type="datetime-local"
-                name="arrivalDate"
-                value={formatForDateTimeLocal(formData.arrivalDate)}
-                onChange={handleChange}
-                onClick={(e) => {
-                  try {
-                    if (typeof e.currentTarget.showPicker === "function") {
-                      e.currentTarget.showPicker();
-                    }
-                  } catch (err) {
-                    console.warn("showPicker not supported:", err);
+            <input
+              type="datetime-local"
+              name="arrivalDate"
+              value={formatForDateTimeLocal(formData.arrivalDate)}
+              onChange={handleChange}
+              onClick={(e) => {
+                try {
+                  if (typeof e.currentTarget.showPicker === "function") {
+                    e.currentTarget.showPicker();
                   }
-                }}
-                className={`w-full bg-slate-100 hover:bg-slate-200 focus:bg-white border border-slate-300 focus:border-fab-blue rounded px-2 py-1.5 text-xs font-sans font-bold cursor-pointer transition-all outline-none h-9 flex items-center ${isDateChronologyInvalid ? "text-red-600 border-red-300 bg-red-50" : "text-slate-900"}`}
-                required
-              />
-            </div>
+                } catch (err) {
+                  console.warn("showPicker not supported:", err);
+                }
+              }}
+              className={`w-full bg-transparent outline-none uppercase font-bold cursor-pointer transition-all mt-1 ${isDateChronologyInvalid ? "text-red-600 bg-red-50" : "text-black"}`}
+              required
+            />
           </div>
           <div
             className={`col-span-12 md:col-span-4 border-b border-slate-800 p-2 flex flex-col transition-all ${isDateChronologyInvalid ? "bg-red-50/70 border-red-300" : ""}`}
@@ -1542,25 +1540,23 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
                 </span>
               )}
             </label>
-            <div className="mt-1">
-              <input
-                type="datetime-local"
-                name="departureDate"
-                value={formatForDateTimeLocal(formData.departureDate)}
-                onChange={handleChange}
-                onClick={(e) => {
-                  try {
-                    if (typeof e.currentTarget.showPicker === "function") {
-                      e.currentTarget.showPicker();
-                    }
-                  } catch (err) {
-                    console.warn("showPicker not supported:", err);
+            <input
+              type="datetime-local"
+              name="departureDate"
+              value={formatForDateTimeLocal(formData.departureDate)}
+              onChange={handleChange}
+              onClick={(e) => {
+                try {
+                  if (typeof e.currentTarget.showPicker === "function") {
+                    e.currentTarget.showPicker();
                   }
-                }}
-                className={`w-full bg-slate-100 hover:bg-slate-200 focus:bg-white border border-slate-300 focus:border-fab-blue rounded px-2 py-1.5 text-xs font-sans font-bold cursor-pointer transition-all outline-none h-9 flex items-center ${isDateChronologyInvalid ? "text-red-600 font-bold border-red-300 bg-red-50" : "text-slate-900"}`}
-                required
-              />
-            </div>
+                } catch (err) {
+                  console.warn("showPicker not supported:", err);
+                }
+              }}
+              className={`w-full bg-transparent outline-none uppercase font-bold cursor-pointer transition-all mt-1 ${isDateChronologyInvalid ? "text-red-600 font-bold bg-red-50" : "text-black"}`}
+              required
+            />
             {isDateChronologyInvalid && (
               <span className="text-[8px] text-red-600 font-bold uppercase mt-1">
                 ⚠️ ETD must not come before ETA
@@ -1569,7 +1565,7 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
           </div>
 
           {/* Row 4 */}
-          <div className="col-span-12 md:col-span-5 border-b border-slate-800 p-2 md:border-r border-r-0">
+          <div className="col-span-12 md:col-span-5 border-b border-slate-800 p-2 flex flex-col md:border-r border-r-0">
             <label className="font-bold mb-1">12. Purpose of Call:</label>
             <select
               name="purpose"
@@ -1599,7 +1595,7 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
               name="origin"
               value={formData.origin || ""}
               onChange={handleChange}
-              className="w-full bg-transparent outline-none uppercase font-bold text-black"
+              className="w-full bg-transparent outline-none uppercase font-bold text-black mt-1"
               required
             />
           </div>
@@ -1610,13 +1606,13 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
               name="nextPort"
               value={formData.nextPort || ""}
               onChange={handleChange}
-              className="w-full bg-transparent outline-none uppercase font-bold text-black"
+              className="w-full bg-transparent outline-none uppercase font-bold text-black mt-1"
               required
             />
           </div>
 
           {/* Row 5 */}
-          <div className="col-span-12 md:col-span-5 border-b border-slate-800 p-2 md:border-r border-r-0">
+          <div className="col-span-12 md:col-span-5 border-b border-slate-800 p-2 flex flex-col md:border-r border-r-0">
             <label className="font-bold mb-1">15. Vessel Operations:</label>
             <select
               name="vesselOperations"
@@ -1642,7 +1638,7 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
               name="terminal"
               value={formData.terminal}
               onChange={handleChange}
-              className="w-full bg-transparent outline-none uppercase font-bold text-black cursor-pointer"
+              className="w-full bg-transparent outline-none uppercase font-bold text-black cursor-pointer mt-1"
               required
             >
               <option value="">-Select-</option>
@@ -1659,7 +1655,7 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
               name="cargoDescription"
               value={formData.cargoDescription}
               onChange={handleChange}
-              className="w-full bg-transparent outline-none uppercase font-bold text-black resize-none h-16 text-[10px] sm:text-xs"
+              className="w-full bg-transparent outline-none uppercase font-bold text-black resize-none h-16 text-[10px] sm:text-xs mt-1"
               required
             />
           </div>
@@ -1895,11 +1891,22 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
                   Ship's Owner Representative / Ship's Agent
                 </p>
               </div>
-              <div className="flex justify-between text-[9px] italic text-slate-600 relative z-10 bg-white/75">
+              <div className="flex justify-between items-end text-[9px] italic text-slate-600 relative z-10 bg-white/75">
                 <span>(Printed Name and Signature)</span>
-                <span>
-                  Date:{" "}
-                  {formatDateTimeString(initialData?.createdAt || new Date())}
+                <span className="flex flex-col items-end">
+                  <span className="text-[8px] text-slate-500 not-italic font-mono">
+                    Time:{" "}
+                    {(() => {
+                      const dt = initialData?.createdAt ? new Date(initialData.createdAt) : new Date();
+                      return !isNaN(dt.getTime())
+                        ? dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+                        : "-";
+                    })()}
+                  </span>
+                  <span>
+                    Date:{" "}
+                    {formatDateTimeString(initialData?.createdAt || new Date())}
+                  </span>
                 </span>
               </div>
             </div>
@@ -1937,23 +1944,36 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
                   {initialData?.checkedByName ||
                     (initialData?.status === "Pending Approval" ||
                     initialData?.status === "Approved"
-                      ? "AFAB PORT CHECKER"
+                      ? "AFAB Authorized Official"
                       : "")}
                 </p>
-                <p className="font-bold text-[10px] text-center font-mono text-[8px] text-slate-500">
-                  AFAB AUTHORIZED CHECKER
+                <p className="font-bold text-[10px] text-center">
+                  AFAB Authorized Official
                 </p>
               </div>
-              <div className="flex justify-between text-[9px] italic text-slate-600 relative z-10 bg-white/75">
+              <div className="flex justify-between items-end text-[9px] italic text-slate-600 relative z-10 bg-white/75">
                 <span>(Printed Name and Signature)</span>
-                <span>
-                  Date:{" "}
-                  {initialData?.checkedAt
-                    ? formatDateTimeString(initialData.checkedAt)
-                    : initialData?.status === "Pending Approval" ||
-                        initialData?.status === "Approved"
-                      ? "VERIFIED"
-                      : ""}
+                <span className="flex flex-col items-end">
+                  {initialData?.checkedAt && (
+                    <span className="text-[8px] text-slate-500 not-italic font-mono">
+                      Time:{" "}
+                      {(() => {
+                        const dt = new Date(initialData.checkedAt);
+                        return !isNaN(dt.getTime())
+                          ? dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+                          : "-";
+                      })()}
+                    </span>
+                  )}
+                  <span>
+                    Date:{" "}
+                    {initialData?.checkedAt
+                      ? formatDateTimeString(initialData.checkedAt)
+                      : initialData?.status === "Pending Approval" ||
+                          initialData?.status === "Approved"
+                        ? "VERIFIED"
+                        : ""}
+                  </span>
                 </span>
               </div>
             </div>
@@ -1976,7 +1996,7 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
                   ) : (
                     <div className="absolute top-4 left-1/2 -translate-x-1/2 flex flex-col items-center">
                       <span className="text-[10px] font-black uppercase text-purple-700 tracking-wider bg-purple-50 border border-purple-300 px-1.5 py-0.5 rounded rotate-[-3deg] shadow-sm select-none">
-                        ★ CHIEF PORT APPROVER
+                        ★ AFAB Authorized Official
                       </span>
                       <span className="text-[7px] font-mono text-purple-600 uppercase tracking-widest mt-0.5">
                         AFAB Port Services
@@ -1989,22 +2009,35 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
                 <p className="font-bold text-[10px] uppercase tracking-wider">
                   {initialData?.approvedByName ||
                     (initialData?.status === "Approved"
-                      ? "PSD CHIEF AUTHORIZED"
+                      ? "AFAB Authorized Official"
                       : "")}
                 </p>
-                <p className="font-bold text-[10px] text-center font-mono text-[8px] text-slate-500">
-                  AFAB AUTHORIZED APPROVER
+                <p className="font-bold text-[10px] text-center">
+                  AFAB Authorized Official
                 </p>
               </div>
-              <div className="flex justify-between text-[9px] italic text-slate-600 relative z-10 bg-white/75">
+              <div className="flex justify-between items-end text-[9px] italic text-slate-600 relative z-10 bg-white/75">
                 <span>(Printed Name and Signature)</span>
-                <span>
-                  Date:{" "}
-                  {initialData?.approvedAt
-                    ? formatDateTimeString(initialData.approvedAt)
-                    : initialData?.status === "Approved"
-                      ? "DIGITALLY ISSUED"
-                      : ""}
+                <span className="flex flex-col items-end">
+                  {initialData?.approvedAt && (
+                    <span className="text-[8px] text-slate-500 not-italic font-mono">
+                      Time:{" "}
+                      {(() => {
+                        const dt = new Date(initialData.approvedAt);
+                        return !isNaN(dt.getTime())
+                          ? dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+                          : "-";
+                      })()}
+                    </span>
+                  )}
+                  <span>
+                    Date:{" "}
+                    {initialData?.approvedAt
+                      ? formatDateTimeString(initialData.approvedAt)
+                      : initialData?.status === "Approved"
+                        ? "DIGITALLY ISSUED"
+                        : ""}
+                  </span>
                 </span>
               </div>
             </div>

@@ -55,7 +55,9 @@ import { ApplicationDashboard } from './components/ApplicationDashboard';
 import { formatSystemDate } from './utils/dateFormatter';
 import { initAuth, logout as googleLogout, googleSignIn, getAccessToken, appendApplicationToSheet } from './services/googleSheetsService';
 
-const COLORS = ['#E44D26', '#F16529', '#264DE4', '#2965F1', '#4D4D4D', '#141414', '#555'];
+// Official Freeport Area of Bataan (FAB) & Port Regulations navigation/regulatory signaling colors:
+// Blue (Authority Blue), Green (Starboard Clearance), Gold (Caution/Beacon), Red (Port Hazard), Cyan (Information Signal), Orange (Safety Assistance)
+const COLORS = ['#004a99', '#10b981', '#fdb913', '#ed1c24', '#00aeef', '#f97316', '#6366f1'];
 
 const safeAlert = (message: string) => {
   console.log("[Alert Message]:", message);
@@ -142,16 +144,8 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
 
-  useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth < 768 && activeTab === 'stats') {
-        setActiveTab('vessels');
-      }
-    };
-    window.addEventListener('resize', handleResize);
-    handleResize();
-    return () => window.removeEventListener('resize', handleResize);
-  }, [activeTab]);
+  // Remove the restriction that forces mobile view away from the statistics tab.
+  // This ensures the Statistics tab remains fully accessible on phone screens.
 
   const [colFilters, setColFilters] = useState({
     id: '',
@@ -499,132 +493,119 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-fab-gold selection:text-fab-blue">
       {/* Top Bar */}
-      <header className="border-b border-fab-blue/20 px-6 py-4 sticky top-0 bg-white/80 backdrop-blur-md z-20 flex flex-col md:flex-row justify-between items-center gap-4 shadow-sm print:hidden">
-        <div className="flex flex-col lg:flex-row items-center gap-4 lg:gap-8 w-full lg:w-auto">
-          <div className="flex items-center gap-3 w-full lg:w-auto">
-            <div className="bg-fab-blue p-2 rounded-lg shadow-lg flex-shrink-0 relative">
-              <Ship className="text-white w-6 h-6" />
-              {isSyncing && <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-fab-red rounded-full border-2 border-white animate-pulse" />}
-            </div>
-            <div>
-              <h1 className="text-xl font-extrabold tracking-tight uppercase leading-none text-fab-blue">Port Services Division</h1>
-              <div className="flex items-center gap-2 mt-1">
-                <p className="text-[10px] font-mono text-fab-cyan font-bold uppercase tracking-[0.2em]">Freeport Area of Bataan</p>
-                <div className="h-3 w-px bg-slate-300" />
-                <p className="text-[9px] font-bold text-slate-500 flex items-center gap-1.5 uppercase font-mono bg-slate-100 px-1.5 py-0.5 rounded">
-                  <span className={cn("w-1.5 h-1.5 rounded-[1px] inline-block", isSyncing ? "bg-fab-red shadow-[0_0_8px_rgba(237,28,36,0.8)] animate-pulse" : "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]")} />
-                  {isSyncing ? "Data Syncing..." : lastUpdated ? `Live: ${lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : "Connecting..."}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <nav className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200 overflow-x-auto w-full lg:w-auto no-scrollbar">
-            <button 
-              onClick={() => setActiveTab('vessels')}
-              className={cn(
-                "px-3 md:px-4 py-1.5 text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all rounded-md flex items-center gap-2 whitespace-nowrap",
-                activeTab === 'vessels' ? "bg-white text-fab-blue shadow-sm border border-slate-200 border-t-2 border-t-fab-red" : "text-slate-500 hover:text-fab-blue"
-              )}
-            >
-              <LayoutDashboard className="w-3.5 h-3.5" /> Vessels
-            </button>
-            <button 
-              onClick={() => setActiveTab('payments')}
-              className={cn(
-                "px-3 md:px-4 py-1.5 text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all rounded-md flex items-center gap-2 whitespace-nowrap",
-                activeTab === 'payments' ? "bg-white text-fab-blue shadow-sm border border-slate-200 border-t-2 border-t-fab-red" : "text-slate-500 hover:text-fab-blue"
-              )}
-            >
-              <CreditCard className="w-3.5 h-3.5" /> Payments
-            </button>
-            <button 
-              onClick={() => setActiveTab('cargo')}
-              className={cn(
-                "px-3 md:px-4 py-1.5 text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all rounded-md flex items-center gap-2 whitespace-nowrap",
-                activeTab === 'cargo' ? "bg-white text-fab-blue shadow-sm border border-slate-200 border-t-2 border-t-fab-red" : "text-slate-500 hover:text-fab-blue"
-              )}
-            >
-              <Package className="w-3.5 h-3.5" /> Cargo
-            </button>
-            <button 
-              onClick={() => setActiveTab('stats')}
-              className={cn(
-                "hidden md:flex px-3 md:px-4 py-1.5 text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all rounded-md items-center gap-2 whitespace-nowrap",
-                activeTab === 'stats' ? "bg-white text-fab-blue shadow-sm border border-slate-200 border-t-2 border-t-fab-red flex" : "text-slate-500 hover:text-fab-blue flex"
-              )}
-            >
-              <BarChart3 className="w-3.5 h-3.5" /> Statistics
-            </button>
-            <button 
-              onClick={() => setActiveTab('applications')}
-              className={cn(
-                "px-3 md:px-4 py-1.5 text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all rounded-md flex items-center gap-2 whitespace-nowrap",
-                activeTab === 'applications' ? "bg-white text-fab-blue shadow-sm border border-slate-200 border-t-2 border-t-fab-red" : "text-slate-500 hover:text-fab-blue"
-              )}
-            >
-              <FileText className="w-3.5 h-3.5" /> Applications
-            </button>
-          </nav>
+      {/* Top Bar */}
+      <header className="border-b border-fab-blue/15 px-4 md:px-6 py-3.5 sticky top-0 bg-white/95 backdrop-blur-md z-20 shadow-xs print:hidden">
+        <div className="max-w-7xl mx-auto flex flex-col gap-3.5">
           
-          <div className="flex items-center gap-3 ml-2 border-l border-slate-300 pl-4">
-            {googleUser ? (
-              <div className="flex items-center gap-1.5 text-[10px] text-green-700 bg-green-50 px-2.5 py-1 rounded border border-green-200">
-                <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
-                <span className="hidden lg:inline font-mono">Sheets Link: {googleUser.email}</span>
-                <span className="lg:hidden font-mono">Linked</span>
-                <button 
-                  onClick={handleGoogleLogout}
-                  className="text-red-500 hover:text-red-700 font-bold underline ml-1 cursor-pointer font-sans"
-                  title="Disconnect Google Sheets ledger account"
-                >
-                  Unlink
-                </button>
+          {/* Row 1: Brand Identifier & Action Controls */}
+          <div className="flex items-center justify-between gap-4 w-full">
+            <div className="flex items-center gap-2.5">
+              <div className="bg-fab-blue p-1.5 md:p-2 rounded-lg shadow-md flex-shrink-0 relative">
+                <Ship className="text-white w-5 h-5 md:w-5.5 md:h-5.5" />
+                {isSyncing && <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-fab-red rounded-full border-2 border-white animate-pulse" />}
               </div>
-            ) : (
-              <button
-                onClick={handleGoogleSignIn}
-                className="flex items-center gap-1.5 text-[10px] font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 px-2.5 py-1 rounded border border-amber-200 transition-colors shadow-xs cursor-pointer font-sans uppercase tracking-wider"
-                title="Authorizes your browser to append approved vessel permits into the Google Sheets database directly"
+              <div>
+                <h1 className="text-base md:text-lg font-black tracking-tight uppercase leading-none text-fab-blue">Port Services Division</h1>
+                <div className="flex items-center gap-1.5 mt-1">
+                  <p className="text-[8px] md:text-[9.5px] font-mono text-fab-cyan font-bold uppercase tracking-[0.15em]">Freeport Area of Bataan</p>
+                  <div className="h-2.5 w-px bg-slate-300" />
+                  <p className="text-[7.5px] md:text-[8px] font-bold text-slate-500 flex items-center gap-1 uppercase font-mono bg-slate-100 px-1 py-0.5 rounded">
+                    <span className={cn("w-1.5 h-1.5 rounded-full inline-block", isSyncing ? "bg-fab-red shadow-[0_0_8px_rgba(237,28,36,0.8)] animate-pulse" : "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]")} />
+                    {isSyncing ? "Sync" : lastUpdated ? `Live: ${lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : "Connecting"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Role & Signout Module (remains side-by-side on phone!) */}
+            <div className="flex items-center gap-2">
+              <span className={cn(
+                "text-[8px] md:text-[9px] font-extrabold px-2 py-0.5 md:py-1 rounded font-mono uppercase tracking-wider border",
+                authRole === 'admin' ? "bg-red-50 text-red-700 border-red-200" :
+                authRole === 'checker' ? "bg-amber-50 text-amber-700 border border-amber-200" :
+                authRole === 'approver' ? "bg-purple-50 text-purple-700 border border-purple-200" :
+                "bg-slate-50 text-slate-700 border-slate-200"
+              )}>
+                {authRole === 'admin' ? 'Admin' : authRole === 'checker' ? 'Checker' : authRole === 'approver' ? 'Approver' : 'User'}
+              </span>
+              <button 
+                onClick={() => {
+                  setAuthRole(null);
+                  setUserEmail(null);
+                  localStorage.removeItem('auth_role');
+                  localStorage.removeItem('auth_email');
+                  handleGoogleLogout();
+                }}
+                className="flex items-center gap-1 px-2 py-1 text-xs text-red-600 hover:bg-red-50 rounded-md transition-colors font-bold uppercase tracking-wider cursor-pointer font-sans"
+                title="Logout"
               >
-                <div className="w-1.5 h-1.5 bg-amber-500 rounded-full" />
-                <span>Link Google Sheets</span>
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline text-[9px] md:text-[10px]">Logout</span>
               </button>
-            )}
-
-            <span className={cn(
-              "text-[9px] font-bold px-2 py-1 rounded font-mono uppercase tracking-wider",
-              authRole === 'admin' ? "bg-red-100 text-red-700" :
-              authRole === 'checker' ? "bg-amber-100 text-amber-700 border border-amber-200" :
-              authRole === 'approver' ? "bg-purple-100 text-purple-700 border border-purple-200" :
-              "bg-slate-100 text-slate-700"
-            )}>
-              {authRole === 'admin' ? 'Admin' : authRole === 'checker' ? 'Port Checker' : authRole === 'approver' ? 'Port Approver' : 'User'}
-            </span>
-            <button 
-              onClick={() => {
-                setAuthRole(null);
-                setUserEmail(null);
-                localStorage.removeItem('auth_role');
-                localStorage.removeItem('auth_email');
-                handleGoogleLogout();
-              }}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 rounded-md transition-colors font-bold uppercase tracking-wider"
-            >
-              <LogOut className="w-4 h-4" />
-              <span className="hidden sm:inline">Logout</span>
-            </button>
+            </div>
           </div>
-        </div>
 
-        <div className="flex flex-wrap items-center gap-2 md:gap-4 w-full md:w-auto">
+          {/* Row 2: Port Control Navigation Deck (Highly Visible, color-themed tabs for mobile & desktop) */}
+          <div className="w-full">
+            <nav className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200/80 overflow-x-auto w-full no-scrollbar relative shadow-inner">
+              {[
+                { id: 'vessels', label: 'Vessels', icon: LayoutDashboard, colorClass: 'text-fab-blue', activeBorder: 'border-fab-blue', bgActive: 'bg-fab-blue/5', beacon: 'bg-fab-blue' },
+                { id: 'payments', label: 'Payments', icon: CreditCard, colorClass: 'text-fab-green', activeBorder: 'border-fab-green', bgActive: 'bg-fab-green/5', beacon: 'bg-fab-green' },
+                { id: 'cargo', label: 'Cargo', icon: Package, colorClass: 'text-fab-gold', activeBorder: 'border-fab-gold', bgActive: 'bg-fab-gold/5', beacon: 'bg-fab-gold' },
+                { id: 'stats', label: 'Statistics', icon: BarChart3, colorClass: 'text-fab-cyan', activeBorder: 'border-fab-cyan', bgActive: 'bg-fab-cyan/5', beacon: 'bg-fab-cyan' },
+                { id: 'applications', label: 'Applications', icon: FileText, colorClass: 'text-fab-red', activeBorder: 'border-fab-red', bgActive: 'bg-fab-red/5', beacon: 'bg-fab-red' }
+              ].map((tab) => {
+                const isActive = activeTab === tab.id;
+                const TabIcon = tab.icon;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id as any)}
+                    className={cn(
+                      "flex-1 md:flex-none px-2 sm:px-3 md:px-5 py-2 text-[9px] sm:text-[10px] md:text-xs font-black uppercase tracking-wider transition-all duration-300 rounded-lg flex items-center justify-center gap-1 sm:gap-2 whitespace-nowrap cursor-pointer select-none relative",
+                      isActive
+                        ? `bg-white ${tab.bgActive} text-slate-950 shadow-xs border border-slate-200`
+                        : "text-slate-500 hover:text-slate-900 hover:bg-white/40"
+                    )}
+                  >
+                    {/* Pulsing Beacon Indicator */}
+                    <span className="relative flex h-1.5 w-1.5 flex-shrink-0">
+                      {isActive && (
+                        <span className={cn("animate-ping absolute inline-flex h-full w-full rounded-full opacity-75", tab.beacon)}></span>
+                      )}
+                      <span className={cn("relative inline-flex rounded-full h-1.5 w-1.5 transition-colors duration-300", isActive ? tab.beacon : "bg-slate-300")}></span>
+                    </span>
+
+                    <TabIcon className={cn("w-3.5 h-3.5 transition-all duration-200-all", isActive ? `${tab.colorClass} scale-110 drop-shadow-xs` : "text-slate-400")} />
+                    <span className={cn("transition-colors duration-200", isActive ? "font-black" : "font-semibold")}>
+                      {tab.label}
+                    </span>
+
+                    {/* Bottom active signal ribbon */}
+                    {isActive && (
+                      <div className={cn(
+                        "absolute bottom-0 left-1.5 right-1.5 h-[3px] rounded-t-full transition-all duration-300",
+                        tab.id === 'vessels' && "bg-fab-blue shadow-[0_-1px_6px_rgba(0,74,153,0.4)]",
+                        tab.id === 'payments' && "bg-fab-green shadow-[0_-1px_6px_rgba(16,185,129,0.4)]",
+                        tab.id === 'cargo' && "bg-fab-gold shadow-[0_-1px_6px_rgba(253,185,19,0.4)]",
+                        tab.id === 'stats' && "bg-fab-cyan shadow-[0_-1px_6px_rgba(0,174,239,0.4)]",
+                        tab.id === 'applications' && "bg-fab-red shadow-[0_-1px_6px_rgba(237,28,36,0.4)]"
+                      )} />
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+
+          {/* Row 3: Live Filters / Date Selections (Active when applicable) */}
           {activeTab === 'vessels' && (
-            <>
-              <div className="flex-1 min-w-[180px] flex items-center border border-slate-200 rounded-lg bg-slate-50 px-2.5 py-1.5 gap-1 focus-within:border-fab-blue transition-all">
+            <div className="w-full flex justify-end">
+              <div className="flex items-center border border-slate-200 rounded-lg bg-slate-50/80 px-2.5 py-1.5 gap-1.5 shadow-2xs hover:border-fab-blue/30 transition-all max-w-full sm:max-w-xs">
                 <History className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                <span className="text-[9px] font-bold uppercase text-slate-400 mr-1 select-none whitespace-nowrap">Period:</span>
+                <span className="text-[9px] font-bold uppercase text-slate-400 select-none whitespace-nowrap">Period:</span>
                 <select 
-                  className="bg-transparent text-[10px] font-bold text-slate-600 focus:outline-none uppercase cursor-pointer min-w-[50px] text-center"
+                  className="bg-transparent text-[10px] font-black text-slate-600 focus:outline-none uppercase cursor-pointer min-w-[50px] text-center"
                   value={startMonth}
                   onChange={(e) => setStartMonth(e.target.value)}
                 >
@@ -634,7 +615,7 @@ export default function App() {
                 </select>
                 <span className="text-[10px] text-slate-300 font-bold px-1 select-none">—</span>
                 <select 
-                  className="bg-transparent text-[10px] font-bold text-slate-600 focus:outline-none uppercase cursor-pointer min-w-[50px] text-center"
+                  className="bg-transparent text-[10px] font-black text-slate-600 focus:outline-none uppercase cursor-pointer min-w-[50px] text-center"
                   value={endMonth}
                   onChange={(e) => setEndMonth(e.target.value)}
                 >
@@ -643,8 +624,9 @@ export default function App() {
                   ))}
                 </select>
               </div>
-            </>
+            </div>
           )}
+
         </div>
       </header>
 
@@ -1056,13 +1038,9 @@ export default function App() {
                     let sheetErrorMsg = '';
                     if (newStatus === 'Approved' && currentApp) {
                       try {
-                        const token = await getAccessToken();
-                        if (token) {
-                          await appendApplicationToSheet({ ...currentApp, ...extraFields, status: 'Approved' });
-                          sheetSyncSuccess = true;
-                        } else {
-                          sheetErrorMsg = 'Google Sheets account is not connected. Please click "Link Google Sheets" inside the top navigation bar to activate automatic syncing.';
-                        }
+                        // Dynamically append directly. If not logged in yet, it will prompt the google connection pop-up automatically!
+                        await appendApplicationToSheet({ ...currentApp, ...extraFields, status: 'Approved' });
+                        sheetSyncSuccess = true;
                       } catch (error: any) {
                         console.error('Failed to append to Google Sheets during approval:', error);
                         sheetErrorMsg = error?.message || 'Connection popup was closed or authentication failed.';

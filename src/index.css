@@ -10,6 +10,9 @@
   --color-fab-gold: #fdb913;
   --color-fab-red: #ed1c24;
   --color-fab-cyan: #00aeef;
+  --color-fab-green: #10b981;
+  --color-fab-navy: #0a1e36;
+  --color-fab-sand: #f8f6f0;
 }
 
 @utility no-scrollbar {

@@ -133,7 +133,7 @@ function parseCurrency(val: string): number {
   return isNaN(num) ? 0 : num;
 }
 
-const ANCILLARY_SHEET_URL = "https://docs.google.com/spreadsheets/d/1SF3CmSAY63C4AzoRWKLjp04ejwhSF3pZyD4M8WC4Fao/export?format=csv&gid=185820608";
+const ANCILLARY_SHEET_URL = "https://docs.google.com/spreadsheets/d/1SF3CmSAY63C4AzoRWKLjp04ejwhSF3pZyD4M8WC4Fao/export?format=csv&gid=424848695";
 
 function normalizeMonth(val: string): string {
   if (!val) return 'UNKNOWN';
@@ -270,13 +270,13 @@ export async function fetchPaymentData(): Promise<PaymentDashboardData> {
               return defaultVal;
             };
 
-            const ctrlIdx = findIndex(['CONTROL NO.', 'CONTROL NO'], 4);
-            const providerIdx = findIndex(['SERVICE PROVIDER'], 5);
-            const vesselIdx = findIndex(['VESSEL NAME'], 6);
-            const terminalIdx = findIndex(['PORT TERMINAL'], 8);
-            const serviceIdx = findIndex(['SERVICE', 'TYPE OF SERVICE'], 10);
+            const ctrlIdx = findIndex(['CONTROL NO.', 'CONTROL NO'], 2);
+            const providerIdx = findIndex(['SERVICE PROVIDER'], 3);
+            const vesselIdx = findIndex(['VESSEL NAME'], 7);
+            const terminalIdx = findIndex(['PORT TERMINAL', 'TERMINAL'], 5);
+            const serviceIdx = findIndex(['SERVICE', 'TYPE OF SERVICE'], 6);
             const dateIdx = findIndex(['DATE OF APPLICATION', 'DATE OF PAYMENT'], 12);
-            const monthIdx = findIndex(['MONTH', 'MONTH OF APPLICATION'], 13);
+            const monthIdx = findIndex(['MONTH', 'MONTH OF APPLICATION'], 4);
             
             const serviceFeeIdx = findIndex(['SERVICE FEE'], -1);
             const vatIdx = findIndex(['VAT'], -1);
@@ -310,8 +310,8 @@ export async function fetchPaymentData(): Promise<PaymentDashboardData> {
                 total = parseCurrency(row[totalIdx]);
               }
 
-              // Fallback standard fees for the live PAS tracking sheet (185820608)
-              if (total === 0 || totalIdx === -1) {
+              // Only fall back to standard default fees if the total column/index is completely missing
+              if (totalIdx === -1) {
                 amount = 1500.00;
                 vat = 180.00;
                 total = 1680.00;

@@ -1181,7 +1181,7 @@ export const PASForm: React.FC<PASFormProps> = ({
                 )}
 
                 <div className="border-t border-slate-400 pt-1 text-center leading-none select-none">
-                  <p className="text-[9px] font-black uppercase text-slate-800 line-clamp-1">{initialData?.checkedByName || 'PORT SERVICES CHECKER'}</p>
+                  <p className="text-[9px] font-black uppercase text-slate-800 line-clamp-1">{initialData?.checkedByName || 'AFAB AUTHORIZED OFFICIAL'}</p>
                   <p className="text-[6.5px] font-extrabold text-slate-400 uppercase tracking-widest mt-1">AFAB Authorized Official</p>
                   <p className="text-[6.5px] text-slate-500 font-extrabold tracking-tight mt-1">
                     Date: {initialData?.checkedAt ? new Date(initialData.checkedAt).toLocaleDateString() : ' '}
@@ -1207,7 +1207,7 @@ export const PASForm: React.FC<PASFormProps> = ({
                 )}
 
                 <div className="border-t border-slate-400 pt-1 text-center leading-none">
-                  <p className="text-[9px] font-black uppercase text-slate-800 line-clamp-1">{initialData?.approvedByName || 'CHIEF PORT APPROVER'}</p>
+                  <p className="text-[9px] font-black uppercase text-slate-800 line-clamp-1">{initialData?.approvedByName || 'AFAB AUTHORIZED OFFICIAL'}</p>
                   <p className="text-[6.5px] font-extrabold text-slate-400 uppercase tracking-widest mt-1">AFAB Authorized Official</p>
                   <p className="text-[6.5px] text-slate-500 font-extrabold tracking-tight mt-1">
                     Date: {initialData?.approvedAt ? new Date(initialData.approvedAt).toLocaleDateString() : ' '}

@@ -193,7 +193,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                           <div className="flex justify-between items-start gap-2 mb-3">
                             <div>
                               <span className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded tracking-wider uppercase inline-block mb-1 ${
-                                app.applicationType === 'PAS' ? 'bg-purple-100 text-purple-700 border border-purple-200' : 'bg-blue-100 text-blue-700 border border-blue-200'
+                                app.applicationType === 'PAS' ? 'bg-fab-cyan/10 text-fab-cyan border border-fab-cyan/20' : 'bg-fab-blue/10 text-fab-blue border border-fab-blue/20'
                               }`}>
                                 {app.applicationType === 'PAS' ? 'Port Ancillary Service' : 'Vessel Entry Permit'}
                               </span>
@@ -203,10 +203,10 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                               <span className="text-[10px] font-mono text-slate-400 block mt-0.5">Ref: {app.id}</span>
                             </div>
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide flex items-center gap-1 border ${
-                              app.status === 'Pending Check' || app.status === 'Pending' ? 'bg-amber-50 border-amber-200 text-amber-700' :
-                              app.status === 'Pending Approval' ? 'bg-purple-50 border-purple-200 text-purple-700 animate-pulse' :
-                              app.status === 'Approved' ? 'bg-green-50 border-green-200 text-green-700' :
-                              'bg-red-50 border-red-200 text-red-700'
+                              app.status === 'Pending Check' || app.status === 'Pending' ? 'bg-fab-gold/10 border-fab-gold/20 text-fab-gold' :
+                              app.status === 'Pending Approval' ? 'bg-fab-cyan/10 border-fab-cyan/20 text-fab-cyan animate-pulse' :
+                              app.status === 'Approved' ? 'bg-fab-green/10 border-fab-green/20 text-fab-green' :
+                              'bg-fab-red/10 border-fab-red/20 text-fab-red'
                             }`}>
                               {app.status === 'Pending Check' || app.status === 'Pending' ? '1. Checker Review' :
                                app.status === 'Pending Approval' ? '2. Approver Review' :

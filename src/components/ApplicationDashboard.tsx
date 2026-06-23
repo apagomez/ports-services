@@ -333,13 +333,7 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
         />
       ) : (
         <>
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 print:hidden">
-            <div>
-              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                <FileText className="w-5 h-5 text-fab-blue" /> Vessel Entry Applications
-              </h2>
-              <p className="text-slate-500 text-sm mt-1 font-medium">Review and manage pending entry permits from clients.</p>
-            </div>
+          <div className="flex flex-col lg:flex-row lg:items-center justify-end gap-4 print:hidden">
             
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
               <button 
@@ -577,66 +571,95 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
               exit={{ opacity: 0, y: 20, scale: 0.95 }}
               className="fixed inset-0 sm:inset-4 md:inset-10 lg:inset-x-20 xl:inset-x-40 bg-white sm:rounded-xl shadow-2xl z-50 overflow-y-auto application-scroll print:static print:inset-auto print:border-none print:shadow-none print:bg-transparent font-sans"
             >
-              <div className="sticky top-0 bg-white border-b border-slate-200 p-4 flex flex-col lg:flex-row items-center justify-between gap-4 z-40 print:hidden shadow-sm">
+              {/* Premium top accent brand line */}
+              <div className="h-1.5 w-full bg-gradient-to-r from-fab-blue via-fab-blue/85 to-fab-gold sticky top-0 z-50 print:hidden shrink-0"></div>
+              
+              <div className="sticky top-1.5 bg-white border-b border-slate-200 p-4 grid grid-cols-1 lg:grid-cols-12 gap-4 items-center z-40 print:hidden shadow-sm">
                 
-                {/* Status Badges or Ref */}
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className={cn(
-                    "px-3 py-1 rounded text-xs font-bold uppercase tracking-widest flex items-center gap-1.5",
-                    getStatusBadgeStyles(selectedApp.status)
-                  )}>
-                    {getStatusIcon(selectedApp.status)}
-                    {getStatusLabel(selectedApp.status)}
-                  </span>
-                  <span className="text-sm font-mono text-slate-500 font-bold">Ref: {selectedApp.id}</span>
+                {/* Left Section: Information & Reference */}
+                <div className="col-span-12 lg:col-span-4 flex flex-col items-start gap-1 pb-2 lg:pb-0 lg:border-r lg:border-slate-100 lg:pr-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500 font-mono text-[9px] bg-slate-100 px-1.5 py-0.5 rounded font-black uppercase border border-slate-200/50">
+                      {selectedApp.applicationType || 'VEP'}
+                    </span>
+                    <h2 className="font-extrabold text-slate-950 uppercase tracking-tight text-sm truncate max-w-[200px]" title={selectedApp.vesselName || 'Unnamed Vessel'}>
+                      {selectedApp.vesselName || 'Unnamed Vessel'}
+                    </h2>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className={cn(
+                      "px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1",
+                      getStatusBadgeStyles(selectedApp.status)
+                    )}>
+                      {getStatusIcon(selectedApp.status)}
+                      {getStatusLabel(selectedApp.status)}
+                    </span>
+                    <span className="text-xs font-mono text-slate-650 font-bold bg-slate-50 px-2 py-0.5 rounded border border-slate-200/40">
+                      Ref: {selectedApp.id}
+                    </span>
+                  </div>
                 </div>
 
-                {/* VISUAL PIPELINE FLOW TRACKER */}
-                <div className="flex items-center text-[10px] font-bold uppercase tracking-wider gap-2 text-slate-400">
-                  <div className="flex items-center gap-1 text-green-600">
-                    <span className="w-5 h-5 bg-green-100 border border-green-200 text-green-700 rounded-full flex items-center justify-center text-[9px]">1</span>
-                    <span>Submit</span>
-                  </div>
-                  <ArrowRight className="w-3 h-3 text-slate-300" />
-                  
-                  <div className={cn(
-                    "flex items-center gap-1",
-                    (selectedApp.status === 'Pending Check' || selectedApp.status === 'Pending') ? "text-amber-600 font-extrabold animate-pulse" :
-                    (selectedApp.status === 'Pending Approval' || selectedApp.status === 'Approved') ? "text-green-600" :
-                    "text-slate-400"
-                  )}>
-                    <span className={cn(
-                      "w-5 h-5 rounded-full flex items-center justify-center text-[9px] border",
-                      (selectedApp.status === 'Pending Check' || selectedApp.status === 'Pending') ? "bg-amber-100 border-amber-300 text-amber-700" :
-                      (selectedApp.status === 'Pending Approval' || selectedApp.status === 'Approved') ? "bg-green-100 border-green-300 text-green-700" :
-                      "bg-slate-100 border-slate-200 text-slate-500"
+                {/* VISUAL PIPELINE FLOW TRACKER (Middle Section) */}
+                <div className="col-span-12 md:col-span-6 lg:col-span-4 flex items-center justify-start lg:justify-center border-t border-b border-slate-100 py-2.5 md:py-0 md:border-none">
+                  <div className="flex items-center text-[10px] font-black uppercase tracking-wider gap-2 text-slate-400 w-full justify-between md:justify-center">
+                    
+                    <div className="flex items-center gap-1.5 text-green-700 bg-green-50 px-2.5 py-1 rounded-md border border-green-100">
+                      <span className="w-5 h-5 bg-green-200 border border-green-300 text-green-800 rounded-full flex items-center justify-center text-[9px] font-black shadow-sm">1</span>
+                      <span>Submit</span>
+                    </div>
+                    
+                    <ArrowRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+                    
+                    <div className={cn(
+                      "flex items-center gap-1.5 px-2.5 py-1 rounded-md border transition-all",
+                      (selectedApp.status === 'Pending Check' || selectedApp.status === 'Pending') 
+                        ? "text-amber-700 bg-amber-50 border-amber-200 animate-pulse shadow-sm" 
+                        : (selectedApp.status === 'Pending Approval' || selectedApp.status === 'Approved') 
+                          ? "text-green-700 bg-green-50 border-green-100" 
+                          : "text-slate-400 bg-slate-50 border-transparent"
                     )}>
-                      2
-                    </span>
-                    <span>Checker</span>
-                  </div>
-                  <ArrowRight className="w-3 h-3 text-slate-300" />
+                      <span className={cn(
+                        "w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black border shadow-sm transition-all",
+                        (selectedApp.status === 'Pending Check' || selectedApp.status === 'Pending') 
+                          ? "bg-amber-200 border-amber-300 text-amber-900" 
+                          : (selectedApp.status === 'Pending Approval' || selectedApp.status === 'Approved') 
+                            ? "bg-green-200 border-green-300 text-green-800" 
+                            : "bg-slate-100 border-slate-200 text-slate-500"
+                      )}>
+                        2
+                      </span>
+                      <span>Checker</span>
+                    </div>
+                    
+                    <ArrowRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
 
-                  <div className={cn(
-                    "flex items-center gap-1",
-                    selectedApp.status === 'Pending Approval' ? "text-purple-600 font-extrabold animate-pulse" :
-                    selectedApp.status === 'Approved' ? "text-green-600" :
-                    "text-slate-400"
-                  )}>
-                    <span className={cn(
-                      "w-5 h-5 rounded-full flex items-center justify-center text-[9px] border",
-                      selectedApp.status === 'Pending Approval' ? "bg-purple-100 border-purple-300 text-purple-700" :
-                      selectedApp.status === 'Approved' ? "bg-green-100 border-green-300 text-green-700" :
-                      "bg-slate-100 border-slate-200 text-slate-500"
+                    <div className={cn(
+                      "flex items-center gap-1.5 px-2.5 py-1 rounded-md border transition-all",
+                      selectedApp.status === 'Pending Approval' 
+                        ? "text-purple-700 bg-purple-50 border-purple-200 animate-pulse shadow-sm" 
+                        : selectedApp.status === 'Approved' 
+                          ? "text-green-700 bg-green-50 border-green-100" 
+                          : "text-slate-400 bg-slate-50 border-transparent"
                     )}>
-                      3
-                    </span>
-                    <span>Approver</span>
+                      <span className={cn(
+                        "w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black border shadow-sm transition-all",
+                        selectedApp.status === 'Pending Approval' 
+                          ? "bg-purple-200 border-purple-300 text-purple-900" 
+                          : selectedApp.status === 'Approved' 
+                            ? "bg-green-200 border-green-300 text-green-800" 
+                            : "bg-slate-100 border-slate-200 text-slate-500"
+                      )}>
+                        3
+                      </span>
+                      <span>Approver</span>
+                    </div>
+
                   </div>
                 </div>
                 
-                {/* ACTIONS CORNER */}
-                <div className="flex flex-wrap items-center gap-2">
+                {/* ACTIONS CORNER (Right Section) */}
+                <div className="col-span-12 md:col-span-6 lg:col-span-4 flex flex-wrap items-center justify-end gap-2">
                   
                   {/* Action buttons based on status and role */}
                   {(selectedApp.status === 'Pending Check' || selectedApp.status === 'Pending') && (
@@ -650,11 +673,11 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                               setDialogSignatureData('');
                               setConfirmDialog({
                                 title: "Verify Vessel Station",
-                                message: "Confirming verification certifies that all arrival indices, berth targets, and declarations are validated. Please fill your name and sign-off below to route this application to the Chief Port Approver's review station.",
+                                message: "Confirming verification certifies that all arrival indices, berth targets, and declarations are validated. Please fill your name and sign-off below to route this application to the AFAB Authorized Official's review station.",
                                 actionLabel: "Verify & Pass",
                                 actionStyle: "bg-purple-600 hover:bg-purple-700",
                                 requireSignature: true,
-                                roleLabel: "Port Checker Full Name",
+                                roleLabel: "AFAB Authorized Official Name",
                                 onConfirm: async (signerName, signatureData) => {
                                   const today = new Date().toISOString();
                                   await handleUpdateStatus(selectedApp.id, 'Pending Approval', {
@@ -666,9 +689,9 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                                 }
                               });
                             }}
-                            className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors"
+                            className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors cursor-pointer"
                           >
-                            <CheckCircle2 className="w-4 h-4" /> Verify & Pass to Approver
+                            <CheckCircle2 className="w-4 h-4" /> Verify & Pass
                           </button>
                           <button 
                             onClick={() => {
@@ -683,15 +706,15 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                                 }
                               });
                             }}
-                            className="bg-white border hover:bg-red-50 border-red-200 text-red-600 px-3 py-2 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors"
+                            className="bg-white border hover:bg-red-50 border-red-200 text-red-600 px-3 py-2 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors cursor-pointer"
                           >
                             <XCircle className="w-4 h-4" /> Reject
                           </button>
                         </>
                       ) : (
-                        <div className="bg-amber-50 text-amber-800 text-[11px] px-3.5 py-2 rounded-lg font-bold border border-amber-200 uppercase tracking-wide select-none text-center">
+                        <div className="bg-amber-50 text-amber-800 text-[10px] px-3 py-1.5 rounded-md font-bold border border-amber-200 uppercase tracking-wider select-none text-center">
                           {authRole === 'approver' 
-                            ? "Awaiting Port Checker Review — Approver cannot approve directly" 
+                            ? "Awaiting Port Checker Review" 
                             : "Awaiting Port Checker Verification"
                           }
                         </div>
@@ -718,7 +741,7 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                                 actionLabel: "Approve & Issue",
                                 actionStyle: "bg-green-600 hover:bg-green-700",
                                 requireSignature: true,
-                                roleLabel: "Port Approver Full Name",
+                                roleLabel: "AFAB Authorized Official Name",
                                 onConfirm: async (signerName, signatureData) => {
                                   try {
                                     const today = new Date().toISOString();
@@ -735,9 +758,9 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                                 }
                               });
                             }}
-                            className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors shadow-sm"
+                            className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
                           >
-                            <CheckCircle2 className="w-4 h-4" /> Authorize & Approve Entry
+                            <CheckCircle2 className="w-4 h-4" /> Approve & Issue
                           </button>
                           <button 
                             onClick={() => {
@@ -752,14 +775,14 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                                 }
                               });
                             }}
-                            className="bg-white border hover:bg-red-50 border-red-200 text-red-600 px-3 py-2 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors"
+                            className="bg-white border hover:bg-red-50 border-red-200 text-red-600 px-3 py-2 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors cursor-pointer"
                           >
-                            <XCircle className="w-4 h-4" /> Deny Approve
+                            <XCircle className="w-4 h-4" /> Reject
                           </button>
                         </>
                       ) : (
-                        <div className="bg-purple-50 text-purple-800 text-xs px-3 py-1.5 rounded-lg font-bold border border-purple-200 uppercase tracking-wider select-none">
-                          Awaiting Approver Authorization
+                        <div className="bg-purple-50 text-purple-800 text-[10px] px-3 py-1.5 rounded-md font-bold border border-purple-200 uppercase tracking-wider select-none text-center">
+                          Awaiting Chief Approver Authorization
                         </div>
                       )}
                     </>
@@ -767,10 +790,10 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
 
                   {selectedApp.status === 'Approved' && (
                     <div className="flex items-center gap-1.5">
-                      <div className="bg-green-100 border border-green-300 text-green-800 text-xs px-3 py-1.5 rounded-lg font-bold uppercase tracking-wider select-none">
-                        Approved & Saved to Sheets
+                      <div className="bg-green-50 border border-green-200 text-green-800 text-[10px] px-3 py-1.5 rounded-md font-bold uppercase tracking-wider select-none">
+                        Approved & Issued
                       </div>
-                      {authRole === 'admin' && (
+                      {(authRole === 'admin' || authRole === 'approver') && (
                         <button 
                           onClick={() => {
                             setConfirmDialog({
@@ -792,7 +815,7 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                               }
                             });
                           }}
-                          className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-1 transition-colors"
+                          className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-1 transition-colors cursor-pointer"
                         >
                           <RotateCcw className="w-4 h-4" /> Revert
                         </button>
@@ -802,7 +825,7 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
 
                   {selectedApp.status === 'Rejected' && (
                     <div className="flex items-center gap-1.5">
-                      <div className="bg-red-50 text-red-800 text-xs px-3 py-1.5 rounded-lg font-bold border border-red-200 uppercase tracking-wider select-none">
+                      <div className="bg-red-50 text-red-800 text-[10px] px-3 py-1.5 rounded-md font-bold border border-red-200 uppercase tracking-wider select-none">
                         Rejected
                       </div>
                       {(authRole === 'admin' || authRole === 'checker' || authRole === 'approver') && (
@@ -827,7 +850,7 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                               }
                             });
                           }}
-                          className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-1 transition-colors"
+                          className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-1 transition-colors cursor-pointer"
                         >
                           <RotateCcw className="w-4 h-4" /> Restart
                         </button>
@@ -857,21 +880,22 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                           }
                         });
                       }}
-                      className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                      className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors cursor-pointer"
                       title="Delete application"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
                   )}
 
-                  <div className="w-px h-6 bg-slate-300 mx-1"></div>
+                  <div className="w-px h-6 bg-slate-200 mx-1"></div>
                   <button 
                     onClick={() => {
                         setSelectedApp(null);
                     }}
-                    className="p-2 text-slate-400 hover:text-slate-600 bg-slate-50 hover:bg-slate-100 rounded-full transition-colors"
+                    className="p-2 text-slate-400 hover:text-slate-800 hover:rotate-90 bg-slate-50 hover:bg-slate-100 rounded-full transition-all duration-200 cursor-pointer border border-slate-200/60"
+                    title="Close Details"
                   >
-                    <X className="w-5 h-5" />
+                    <X className="w-4.5 h-4.5" />
                   </button>
                 </div>
               </div>
