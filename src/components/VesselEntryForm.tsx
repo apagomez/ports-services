@@ -7,15 +7,17 @@ import { VesselData, VesselApplication } from "../types";
 import fabLogo from "../assets/images/fab-logo.png";
 import { getAccessToken } from "../services/googleSheetsService";
 import { formatSystemDate } from "../utils/dateFormatter";
+import { oklchToRgb } from "../utils/colorConverter";
 
 interface VesselEntryFormProps {
   onBack: () => void;
   onSubmitApp?: (
-    app: Omit<VesselApplication, "id" | "createdAt" | "status">,
-  ) => void;
+    app: Omit<VesselApplication, "id" | "createdAt" | "status"> & { id?: string },
+  ) => void | Promise<void>;
   initialData?: Partial<VesselApplication>;
   isEditMode?: boolean;
   isAdmin?: boolean;
+  authRole?: 'admin' | 'user' | 'checker' | 'approver';
   options?: {
     voyages: string[];
     types: string[];
@@ -103,127 +105,6 @@ const parseDateString = (dateString?: string): Date | null => {
   return null;
 };
 
-const oklchToRgb = (str: string): string => {
-  if (!str) return "";
-  // 1. Convert OKLCH to RGB/RGBA
-  let result = str.replace(
-    /oklch\(\s*([\d.]+)(%?)\s+([\d.]+)(%?)\s+([\d.]+)(deg|rad)?(?:\s*\/\s*([\d.e-]+)(%?))?\s*\)/gi,
-    (match, lVal, lPercent, cVal, cPercent, hVal, hUnit, aVal, aPercent) => {
-      let L = parseFloat(lVal);
-      if (lPercent === "%") L /= 100;
-
-      let C = parseFloat(cVal);
-      if (cPercent === "%") C /= 100;
-
-      let H = parseFloat(hVal);
-      if (hUnit === "rad") {
-        H = (H * 180) / Math.PI;
-      }
-
-      let alpha = 1;
-      if (aVal !== undefined) {
-        alpha = parseFloat(aVal);
-        if (aPercent === "%") alpha /= 100;
-      }
-
-      const H_rad = (H * Math.PI) / 180;
-      const a = C * Math.cos(H_rad);
-      const b = C * Math.sin(H_rad);
-
-      const L_lms = L + 0.3963377774 * a + 0.2158037573 * b;
-      const M_lms = L - 0.1055613458 * a - 0.0638541728 * b;
-      const S_lms = L - 0.0894841775 * a - 1.291485548 * b;
-
-      const l = Math.pow(Math.max(0, L_lms), 3);
-      const m = Math.pow(Math.max(0, M_lms), 3);
-      const s = Math.pow(Math.max(0, S_lms), 3);
-
-      let r = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
-      let g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
-      let b_rgb = -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s;
-
-      const transform = (x: number) => {
-        if (x > 0.0031308) {
-          return 1.055 * Math.pow(x, 1 / 2.4) - 0.055;
-        }
-        return 12.92 * x;
-      };
-
-      let R_val = Math.max(0, Math.min(255, Math.round(transform(r) * 255)));
-      let G_val = Math.max(0, Math.min(255, Math.round(transform(g) * 255)));
-      let B_val = Math.max(
-        0,
-        Math.min(255, Math.round(transform(b_rgb) * 255)),
-      );
-
-      if (alpha === 1) {
-        return `rgb(${R_val},${G_val},${B_val})`;
-      } else {
-        return `rgba(${R_val},${G_val},${B_val},${alpha})`;
-      }
-    },
-  );
-
-  // 2. Convert OKLAB to RGB/RGBA
-  result = result.replace(
-    /oklab\(\s*([\d.]+)(%?)\s+([\d.-]+)(%?)\s+([\d.-]+)(%?)(?:\s*\/\s*([\d.]+)(%?))?\s*\)/gi,
-    (
-      match,
-      lVal,
-      lPercent,
-      aVal,
-      aPercent,
-      bVal,
-      bPercent,
-      aVal2,
-      aPercent2,
-    ) => {
-      let L = parseFloat(lVal);
-      if (lPercent === "%") L /= 100;
-      let aValNum = parseFloat(aVal);
-      if (aPercent === "%") aValNum /= 100;
-      let bValNum = parseFloat(bVal);
-      if (bPercent === "%") bValNum /= 100;
-
-      let alpha = 1;
-      if (aVal2 !== undefined) {
-        alpha = parseFloat(aVal2);
-        if (aPercent2 === "%") alpha /= 100;
-      }
-
-      const L_lms = L + 0.3963377774 * aValNum + 0.2158037573 * bValNum;
-      const M_lms = L - 0.1055613458 * aValNum - 0.0638541728 * bValNum;
-      const S_lms = L - 0.0894841775 * aValNum - 1.291485548 * bValNum;
-
-      const l = Math.pow(Math.max(0, L_lms), 3);
-      const m = Math.pow(Math.max(0, M_lms), 3);
-      const s = Math.pow(Math.max(0, S_lms), 3);
-
-      let r = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
-      let g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
-      let b_rgb = -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s;
-
-      const transform = (x: number) =>
-        x > 0.0031308 ? 1.055 * Math.pow(x, 1 / 2.4) - 0.055 : 12.92 * x;
-
-      let R_val = Math.max(0, Math.min(255, Math.round(transform(r) * 255)));
-      let G_val = Math.max(0, Math.min(255, Math.round(transform(g) * 255)));
-      let B_val = Math.max(
-        0,
-        Math.min(255, Math.round(transform(b_rgb) * 255)),
-      );
-
-      if (alpha === 1) {
-        return `rgb(${R_val},${G_val},${B_val})`;
-      } else {
-        return `rgba(${R_val},${G_val},${B_val},${alpha})`;
-      }
-    },
-  );
-
-  return result;
-};
-
 const formatForDateTimeLocal = (dateString?: string): string => {
   const d = parseDateString(dateString);
   if (d) {
@@ -252,10 +133,12 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
   initialData,
   isEditMode,
   isAdmin,
+  authRole = 'user',
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [isSavingControlNo, setIsSavingControlNo] = useState(false);
   const [dateError, setDateError] = useState<string | null>(null);
 
   const [controlNumber, setControlNumber] = useState<string>(
@@ -264,6 +147,7 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
   const [isLoadingControlNum, setIsLoadingControlNum] = useState(false);
 
   const [formData, setFormData] = useState<Partial<VesselApplication>>({
+    applicationType: "VEP",
     vesselName: initialData?.vesselName || "",
     agent: initialData?.agent || "",
     voyageType: initialData?.voyageType || "",
@@ -436,28 +320,81 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
       const fetchAndSetControlNumber = async () => {
         let csvText = "";
         let isMock = false;
-        try {
-          const sheetUrl = `https://docs.google.com/spreadsheets/d/1-uW1UBucCT4VondGmlTo7hcgHVtbBPA_JE49qp-yntA/export?format=csv&gid=960645385&t=${Date.now()}`;
-          const res = await fetch(sheetUrl, { cache: "no-store" });
+        let rows: string[][] = [];
+        let fetchedSuccessfully = false;
 
-          if (res.redirected && res.url.includes("ServiceLogin")) {
-            console.warn(
-              "Google Sheets redirected to login. Using fallback CSV.",
-            );
-            const fallbackRes = await fetch(
-              `/vessels_mock.csv?t=${Date.now()}`,
-            );
-            csvText = await fallbackRes.text();
-            isMock = true;
-          } else if (!res.ok) {
-            console.warn("Google Sheets fetch failed. Using fallback CSV.");
-            const fallbackRes = await fetch(
-              `/vessels_mock.csv?t=${Date.now()}`,
-            );
-            csvText = await fallbackRes.text();
-            isMock = true;
-          } else {
-            csvText = await res.text();
+        try {
+          const { getAccessToken, getVesselMasterSpreadsheetId } = await import('../services/googleSheetsService');
+          const token = await getAccessToken();
+          const spreadId = getVesselMasterSpreadsheetId();
+
+          if (token) {
+            // Try using Google Sheets API first for the most accurate and fresh live data
+            try {
+              // 1. Fetch metadata to get the actual sheet name for GID 960645385
+              const metaResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadId}?fields=sheets.properties(title,sheetId)`, {
+                headers: {
+                  'Authorization': `Bearer ${token}`
+                }
+              });
+              if (metaResponse.ok) {
+                const metaData = await metaResponse.json();
+                const sheetsList = metaData.sheets || [];
+                const foundSheet = sheetsList.find((s: any) => Number(s.properties?.sheetId) === 960645385);
+                const targetSheetName = foundSheet?.properties?.title || sheetsList[0]?.properties?.title || 'Sheet1';
+
+                // 2. Fetch column values (A:F) from that specific sheet
+                const res = await fetch(
+                  `https://sheets.googleapis.com/v4/spreadsheets/${spreadId}/values/'${encodeURIComponent(targetSheetName)}'!A:F`,
+                  {
+                    headers: {
+                      'Authorization': `Bearer ${token}`
+                    }
+                  }
+                );
+                if (res.ok) {
+                  const data = await res.json();
+                  if (data.values) {
+                    rows = data.values;
+                    fetchedSuccessfully = true;
+                    isMock = false;
+                    console.log("[VesselEntryForm] Successfully fetched latest VEP control numbers via Google Sheets API. Count:", rows.length);
+                  }
+                }
+              }
+            } catch (apiErr) {
+              console.warn("[VesselEntryForm] Google Sheets API fetch failed, trying CSV export:", apiErr);
+            }
+          }
+
+          if (!fetchedSuccessfully) {
+            const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadId}/export?format=csv&gid=960645385&t=${Date.now()}`;
+            const headers: HeadersInit = {};
+            if (token) {
+              headers['Authorization'] = `Bearer ${token}`;
+            }
+            const res = await fetch(sheetUrl, { headers, cache: "no-store" });
+
+            if (res.redirected && res.url.includes("ServiceLogin")) {
+              console.warn(
+                "Google Sheets redirected to login. Using fallback CSV.",
+              );
+              const fallbackRes = await fetch(
+                `/vessels_mock.csv?t=${Date.now()}`,
+              );
+              csvText = await fallbackRes.text();
+              isMock = true;
+            } else if (!res.ok) {
+              console.warn("Google Sheets fetch failed. Using fallback CSV.");
+              const fallbackRes = await fetch(
+                `/vessels_mock.csv?t=${Date.now()}`,
+              );
+              csvText = await fallbackRes.text();
+              isMock = true;
+            } else {
+              csvText = await res.text();
+              isMock = false;
+            }
           }
         } catch (err) {
           console.warn(
@@ -475,129 +412,137 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
           }
         }
 
-        if (!csvText) {
+        // Parse fallback CSV if we don't have row data yet
+        if (!fetchedSuccessfully && csvText) {
+          await new Promise<void>((resolve) => {
+            Papa.parse(csvText, {
+              header: false,
+              complete: (result) => {
+                rows = result.data as string[][];
+                fetchedSuccessfully = true;
+                resolve();
+              },
+              error: (err) => {
+                console.error("Papa parse error in fetchAndSetControlNumber fallback:", err);
+                resolve();
+              }
+            });
+          });
+        }
+
+        if (!fetchedSuccessfully || !rows || rows.length === 0) {
           setControlNumber("PSD-26-001");
           setIsLoadingControlNum(false);
           return;
         }
 
-        Papa.parse(csvText, {
-          header: false,
-          complete: (result) => {
-            const rows = result.data as string[][];
-            let found = false;
+        let found = false;
 
-            // 1. Try to find a pre-allocated empty control number row in the sheet
-            // ONLY if this is the live sheet!
-            if (!isMock) {
-              for (let i = 0; i < rows.length; i++) {
-                const row = rows[i];
-                if (row && row[0]) {
-                  const ctrl = row[0].trim().toUpperCase();
-                  if (
-                    ctrl.startsWith("PSD-") &&
-                    (!row[5] || row[5].trim() === "")
-                  ) {
-                    const baseMatch = ctrl.match(/^(PSD-\d{2}-\d{3,4})/);
-                    const parsedControlNo = baseMatch ? baseMatch[1] : ctrl;
+        // 1. Try to find a pre-allocated empty control number row in the sheet
+        // ONLY if this is the live sheet!
+        if (!isMock) {
+          for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            if (row && row[0]) {
+              const ctrl = row[0].trim().toUpperCase();
+              if (
+                ctrl.startsWith("PSD-") &&
+                (!row[5] || row[5].trim() === "")
+              ) {
+                const baseMatch = ctrl.match(/^(PSD-\d{2}-\d{3,4})/);
+                const parsedControlNo = baseMatch ? baseMatch[1] : ctrl;
 
-                    if (
-                      !options?.usedControlNumbers?.includes(parsedControlNo)
-                    ) {
-                      setControlNumber(parsedControlNo);
-                      found = true;
-                      break;
-                    }
-                  }
-                }
-              }
-            }
-
-            // 2. If no blank entries exist, generate the next sequential code below the last control number
-            if (!found) {
-              let maxSeqNum = 0;
-              let yearPrefix = "26";
-              let hasAnyPsd = false;
-
-              // Parse rows from the CSV
-              for (let i = 0; i < rows.length; i++) {
-                const row = rows[i];
-                if (row && row[0]) {
-                  const ctrl = row[0].trim().toUpperCase();
-                  if (ctrl.startsWith("PSD-")) {
-                    // If we are looking at the mock CSV, we ONLY count the row if it's filled (row[5] is not empty).
-                    // This avoids the stale pre-allocated placeholders that got added to the mock CSV.
-                    if (isMock && (!row[5] || row[5].trim() === "")) {
-                      continue;
-                    }
-                    hasAnyPsd = true;
-                    const match = ctrl.match(/PSD-(\d{2})-(\d+)/i);
-                    if (match) {
-                      const yr = match[1];
-                      const seq = parseInt(match[2], 10);
-                      if (!isNaN(seq)) {
-                        if (seq > maxSeqNum) {
-                          maxSeqNum = seq;
-                          yearPrefix = yr;
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-
-              // Also check control numbers in options?.usedControlNumbers!
-              if (options?.usedControlNumbers) {
-                options.usedControlNumbers.forEach((ctrlNum) => {
-                  const ctrl = ctrlNum.trim().toUpperCase();
-                  if (ctrl.startsWith("PSD-")) {
-                    hasAnyPsd = true;
-                    const match = ctrl.match(/PSD-(\d{2})-(\d+)/i);
-                    if (match) {
-                      const yr = match[1];
-                      const seq = parseInt(match[2], 10);
-                      if (!isNaN(seq)) {
-                        if (seq > maxSeqNum) {
-                          maxSeqNum = seq;
-                          yearPrefix = yr;
-                        }
-                      }
-                    }
-                  }
-                });
-              }
-
-              let nextSeqNum = hasAnyPsd ? maxSeqNum + 1 : 1;
-              while (true) {
-                const paddedSeq = String(nextSeqNum).padStart(3, "0");
-                const candidateBase = `PSD-${yearPrefix}-${paddedSeq}`;
-
-                const isUsed = options?.usedControlNumbers?.some((num) => {
-                  const cleanNum = (num || "").trim().toUpperCase();
-                  return (
-                    cleanNum === candidateBase ||
-                    cleanNum.startsWith(candidateBase) ||
-                    candidateBase.startsWith(cleanNum)
-                  );
-                });
-
-                if (!isUsed) {
+                if (
+                  !options?.usedControlNumbers?.includes(parsedControlNo)
+                ) {
+                  setControlNumber(parsedControlNo);
+                  found = true;
                   break;
                 }
-                nextSeqNum++;
               }
-
-              const finalPaddedSeq = String(nextSeqNum).padStart(3, "0");
-              const finalControlNo = `PSD-${yearPrefix}-${finalPaddedSeq}`;
-              setControlNumber(finalControlNo);
             }
-            setIsLoadingControlNum(false);
-          },
-          error: (err) => {
-            console.error("Error parsing CSV for control number:", err);
-            setIsLoadingControlNum(false);
-          },
-        });
+          }
+        }
+
+        // 2. If no blank entries exist, generate the next sequential code below the last control number
+        if (!found) {
+          let maxSeqNum = 0;
+          let yearPrefix = "26";
+          let hasAnyPsd = false;
+
+          // Parse rows
+          for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            if (row && row[0]) {
+              const ctrl = row[0].trim().toUpperCase();
+              if (ctrl.startsWith("PSD-")) {
+                // If we are looking at the mock CSV, we ONLY count the row if it's filled (row[5] is not empty).
+                // This avoids the stale pre-allocated placeholders that got added to the mock CSV.
+                if (isMock && (!row[5] || row[5].trim() === "")) {
+                  continue;
+                }
+                hasAnyPsd = true;
+                const match = ctrl.match(/PSD-(\d{2})-(\d+)/i);
+                if (match) {
+                  const yr = match[1];
+                  const seq = parseInt(match[2], 10);
+                  if (!isNaN(seq)) {
+                    if (seq > maxSeqNum) {
+                      maxSeqNum = seq;
+                      yearPrefix = yr;
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // Also check control numbers in options?.usedControlNumbers!
+          if (options?.usedControlNumbers) {
+            options.usedControlNumbers.forEach((ctrlNum) => {
+              const ctrl = ctrlNum.trim().toUpperCase();
+              if (ctrl.startsWith("PSD-")) {
+                hasAnyPsd = true;
+                const match = ctrl.match(/PSD-(\d{2})-(\d+)/i);
+                if (match) {
+                  const yr = match[1];
+                  const seq = parseInt(match[2], 10);
+                  if (!isNaN(seq)) {
+                    if (seq > maxSeqNum) {
+                      maxSeqNum = seq;
+                      yearPrefix = yr;
+                    }
+                  }
+                }
+              }
+            });
+          }
+
+          let nextSeqNum = hasAnyPsd ? maxSeqNum + 1 : 1;
+          while (true) {
+            const paddedSeq = String(nextSeqNum).padStart(3, "0");
+            const candidateBase = `PSD-${yearPrefix}-${paddedSeq}`;
+
+            const isUsed = options?.usedControlNumbers?.some((num) => {
+              const cleanNum = (num || "").trim().toUpperCase();
+              return (
+                cleanNum === candidateBase ||
+                cleanNum.startsWith(candidateBase) ||
+                candidateBase.startsWith(cleanNum)
+              );
+            });
+
+            if (!isUsed) {
+              break;
+            }
+            nextSeqNum++;
+          }
+
+          const finalPaddedSeq = String(nextSeqNum).padStart(3, "0");
+          const finalControlNo = `PSD-${yearPrefix}-${finalPaddedSeq}`;
+          setControlNumber(finalControlNo);
+        }
+        setIsLoadingControlNum(false);
       };
 
       fetchAndSetControlNumber();
@@ -1210,29 +1155,32 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
 
       setTimeout(() => {
         setShowSuccess(false);
-        setFormData({
-          vesselName: "",
-          agent: "",
-          voyageType: "",
-          vesselType: "",
-          voyageNo: "",
-          shippingLine: "",
-          masterName: "",
-          registry: "",
-          grossTonnage: "",
-          loa: "",
-          terminal: "",
-          cargoDescription: "",
-          arrivalDate: "",
-          departureDate: "",
-          purpose: "",
-          origin: "",
-          nextPort: "",
-          vesselOperations: "",
-          submitterName: "",
-          signatureType: "draw",
-          signatureData: "",
-        });
+        if (!isEditMode) {
+          setFormData({
+            applicationType: "VEP",
+            vesselName: "",
+            agent: "",
+            voyageType: "",
+            vesselType: "",
+            voyageNo: "",
+            shippingLine: "",
+            masterName: "",
+            registry: "",
+            grossTonnage: "",
+            loa: "",
+            terminal: "",
+            cargoDescription: "",
+            arrivalDate: "",
+            departureDate: "",
+            purpose: "",
+            origin: "",
+            nextPort: "",
+            vesselOperations: "",
+            submitterName: "",
+            signatureType: "draw",
+            signatureData: "",
+          });
+        }
         onBack();
       }, 3000);
     }, 1000);
@@ -1252,6 +1200,57 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
           {isEditMode ? "Cancel Edit & Return" : "Back to Dashboard"}
         </button>
       </div>
+
+      {isEditMode && (authRole === 'admin' || authRole === 'checker' || authRole === 'approver') && (
+        <div className="mb-6 bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3 print:hidden">
+          <h3 className="font-extrabold text-xs text-slate-400 uppercase tracking-widest pb-2 border-b border-slate-100">
+            Stage Control & Actions (VEP)
+          </h3>
+          <p className="text-slate-600 text-xs leading-relaxed font-semibold">
+            This vessel entry permit is in review mode. You can edit the VEP Control Number below and update the Firestore records instantly.
+          </p>
+          <div className="bg-amber-50/70 p-4 rounded-lg border border-amber-200/50 space-y-2 max-w-md">
+            <label className="block text-[10px] font-black uppercase tracking-wider text-amber-800">
+              Edit VEP Control Number
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={controlNumber}
+                onChange={(e) => setControlNumber(e.target.value.toUpperCase())}
+                placeholder="PSD-26-XXX"
+                className="flex-1 bg-white border border-slate-300 rounded px-2.5 py-1.5 text-xs font-mono font-bold uppercase text-slate-900 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+              />
+              <button
+                type="button"
+                disabled={isSavingControlNo || controlNumber.trim() === (initialData?.id || '') || !controlNumber.trim()}
+                onClick={async () => {
+                  if (!controlNumber.trim()) return;
+                  try {
+                    setIsSavingControlNo(true);
+                    await onSubmitApp?.({
+                      ...formData,
+                      id: controlNumber.trim(),
+                    } as any);
+                    alert("VEP Control Number successfully updated!");
+                  } catch (err: any) {
+                    console.error("Failed to update VEP Control Number:", err);
+                    alert(`Failed to update: ${err.message}`);
+                  } finally {
+                    setIsSavingControlNo(false);
+                  }
+                }}
+                className="bg-amber-600 hover:bg-amber-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-extrabold text-[10px] uppercase tracking-wider px-3.5 py-1.5 rounded transition-colors cursor-pointer shrink-0"
+              >
+                {isSavingControlNo ? "Saving..." : "Update"}
+              </button>
+            </div>
+            <p className="text-[9px] text-amber-700 font-medium leading-relaxed">
+              Notice: Changing this will rename the document key in Firestore and automatically update linked records.
+            </p>
+          </div>
+        </div>
+      )}
 
       {showSuccess && (
         <motion.div
@@ -1326,7 +1325,7 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
                     LOADING...
                   </span>
                 ) : isEditMode ? (
-                  isAdmin ? (
+                  (isAdmin || authRole === 'admin' || authRole === 'checker' || authRole === 'approver') ? (
                     <input
                       type="text"
                       className="font-mono font-bold text-sm text-black bg-transparent border-b border-dashed border-black outline-none px-1 uppercase w-full"

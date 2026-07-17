@@ -49,11 +49,15 @@ import { detectVesselAnomalies } from './utils/anomalyDetector';
 import { PaymentDashboard } from './components/PaymentDashboard';
 import { CargoDashboard } from './components/CargoDashboard';
 import { StatisticsDashboard } from './components/StatisticsDashboard';
+import { StatCard, DetailItem, TRENDING_UP } from './components/common';
+import { VesselTable } from './components/VesselTable';
+import { VesselDetailDrawer } from './components/VesselDetailDrawer';
 import { LoginForm } from './components/LoginForm';
 import { UserDashboard } from './components/UserDashboard';
 import { ApplicationDashboard } from './components/ApplicationDashboard';
 import { formatSystemDate } from './utils/dateFormatter';
-import { initAuth, logout as googleLogout, googleSignIn, getAccessToken, appendApplicationToSheet } from './services/googleSheetsService';
+import { safeStorage } from './utils/safeStorage';
+import { initAuth, logout as googleLogout, googleSignIn, getAccessToken, appendApplicationToSheet, deleteApplicationFromSheet } from './services/googleSheetsService';
 
 // Official Freeport Area of Bataan (FAB) & Port Regulations navigation/regulatory signaling colors:
 // Blue (Authority Blue), Green (Starboard Clearance), Gold (Caution/Beacon), Red (Port Hazard), Cyan (Information Signal), Orange (Safety Assistance)
@@ -69,8 +73,8 @@ const safeAlert = (message: string) => {
 };
 
 export default function App() {
-  const [authRole, setAuthRole] = useState<'admin' | 'user' | 'checker' | 'approver' | null>(() => (localStorage.getItem('auth_role') as any) || null);
-  const [userEmail, setUserEmail] = useState<string | null>(() => localStorage.getItem('auth_email') || null);
+  const [authRole, setAuthRole] = useState<'admin' | 'user' | 'checker' | 'approver' | null>(() => (safeStorage.getItem('auth_role') as any) || null);
+  const [userEmail, setUserEmail] = useState<string | null>(() => safeStorage.getItem('auth_email') || null);
   
   const [data, setData] = useState<VesselData[]>([]);
   const [paymentData, setPaymentData] = useState<PaymentDashboardData | null>(null);
@@ -82,7 +86,7 @@ export default function App() {
     
     import('./services/firebaseService').then(({ subscribeToApplications, saveApplicationToFirestore }) => {
       // Automatic migration from localStorage to Firestore
-      const localData = localStorage.getItem('vessel_applications');
+      const localData = safeStorage.getItem('vessel_applications');
       if (localData) {
         try {
           const parsed = JSON.parse(localData);
@@ -90,7 +94,7 @@ export default function App() {
             console.log('Migrating local applications to Firestore...');
             
             const migrate = async () => {
-              localStorage.removeItem('vessel_applications');
+              safeStorage.removeItem('vessel_applications');
               for (const app of parsed) {
                 try {
                   await saveApplicationToFirestore(app);
@@ -166,18 +170,28 @@ export default function App() {
 
   useEffect(() => {
     setIsGoogleLoading(true);
-    const unsubscribe = initAuth(
-      (user, token) => {
-        setGoogleUser(user);
-        setGoogleToken(token);
-        setIsGoogleLoading(false);
-      },
-      () => {
-        setGoogleUser(null);
-        setGoogleToken(null);
+    let unsubscribe: any;
+    try {
+      const hasToken = !!safeStorage.getItem('google_access_token');
+      if (hasToken) {
+        unsubscribe = initAuth(
+          (user, token) => {
+            setGoogleUser(user);
+            setGoogleToken(token);
+            setIsGoogleLoading(false);
+          },
+          () => {
+            setGoogleUser(null);
+            setGoogleToken(null);
+            setIsGoogleLoading(false);
+          }
+        );
+      } else {
         setIsGoogleLoading(false);
       }
-    );
+    } catch(e) {
+      setIsGoogleLoading(false);
+    }
     return () => {
       if (typeof unsubscribe === 'function') {
         unsubscribe();
@@ -191,7 +205,7 @@ export default function App() {
       if (res) {
         setGoogleUser(res.user);
         setGoogleToken(res.accessToken);
-        alert(`Successfully connected Google Sheets account: ${res.user.email}`);
+        safeAlert(`Successfully connected Google Sheets account: ${res.user.email}`);
       }
     } catch (error: any) {
       if (error?.code === 'auth/popup-closed-by-user' || error?.message?.includes('popup-closed-by-user') || error?.code === 'auth/cancelled-popup-request') {
@@ -199,7 +213,7 @@ export default function App() {
         return;
       }
       console.error('Google Sheets auth failed:', error);
-      alert(`Google Connection Failed: ${error.message}`);
+      safeAlert(`Google Connection Failed: ${error.message}`);
     }
   };
 
@@ -208,7 +222,7 @@ export default function App() {
       await googleLogout();
       setGoogleUser(null);
       setGoogleToken(null);
-      alert('Google Sheets account unlinked.');
+      safeAlert('Google Sheets account unlinked.');
     } catch (error: any) {
       console.error('Google Sheets sign out failed:', error);
     }
@@ -253,8 +267,80 @@ export default function App() {
     }
   }, [authRole, fetchData]);
 
+  const allVessels = useMemo(() => {
+    // Start with the fetched vessel list from Google Sheets or fallback CSV
+    const list = [...data];
+    
+    // Find all VEP applications that are Approved and NOT already in the list
+    const approvedVepApps = applications.filter(
+      app => 
+        (app.applicationType === 'VEP' || !app.applicationType) && 
+        app.status === 'Approved'
+    );
+    
+    approvedVepApps.forEach(app => {
+      // Avoid duplicate control number
+      const cleanAppId = (app.id || '').trim().toUpperCase();
+      const alreadyExists = list.some(
+        v => (v.controlNo || '').trim().toUpperCase() === cleanAppId
+      );
+      
+      if (!alreadyExists) {
+        const orientation = (app.voyageType || '').toLowerCase().includes('foreign') ? 'Foreign' : 'Domestic';
+        const gt = parseFloat(String(app.grossTonnage || '0').replace(/,/g, '')) || 0;
+        
+        // Calculate status dynamically
+        let vesselStatus = 'APPROVED';
+        if (app.arrivalDate) {
+          const arrDate = new Date(app.arrivalDate);
+          if (arrDate.getTime() <= Date.now()) {
+            vesselStatus = 'BERTHED';
+          } else {
+            vesselStatus = 'ARRIVING';
+          }
+        }
+        
+        const mappedVessel: VesselData = {
+          controlNo: app.id || '',
+          aveNumber: (app.id || '').match(/-(\d{3})-?/)?.[1] || '000',
+          month: app.createdAt ? new Date(app.createdAt).toLocaleString('default', { month: 'long' }).toUpperCase() : 'UNKNOWN',
+          terminal: app.terminal || 'UNKNOWN',
+          voyageType: app.voyageType || 'DOMESTIC',
+          vesselName: app.vesselName || 'UNNAMED VESSEL',
+          voyageNo: app.voyageNo || 'N/A',
+          status: vesselStatus,
+          remarks: `Approved by: ${app.approvedByName || 'Authorized Official'}`,
+          purpose: app.purpose || '',
+          operation: app.vesselOperations || '',
+          vesselType: app.vesselType || 'CARGO',
+          orientation: orientation as 'Foreign' | 'Domestic',
+          agent: app.agent || '',
+          shippingLine: app.shippingLine || '',
+          consignee: '',
+          origin: app.origin || '',
+          nextPort: app.nextPort || '',
+          shipmentKind: '',
+          passengers: 0,
+          registry: app.registry || '',
+          gt: gt,
+          motorized: 'YES',
+          arrivalDate: app.arrivalDate || '',
+          departureDate: app.departureDate || '',
+          cargoDescription: app.cargoDescription || '',
+          cargoVolumeMT: 0,
+          cargoVolumeCBM: 0,
+          atBerthDays: 2,
+          berthProductivity: 0
+        };
+        list.push(mappedVessel);
+      }
+    });
+    
+    return list;
+  }, [data, applications]);
+
   const filteredData = useMemo(() => {
-    return data.filter(v => {
+    return allVessels.filter(v => {
       const matchesSearch = v.vesselName.toLowerCase().includes(search.toLowerCase()) || 
                           v.controlNo.toLowerCase().includes(search.toLowerCase());
       const matchesType = filterType === 'All' || v.vesselType === filterType;
@@ -295,14 +381,14 @@ export default function App() {
              matchesId && matchesName && matchesOrientation && matchesColType &&
              matchesTerminal && matchesLoadVolume && matchesCargoDesc && matchesStatus && matchesArrival && matchesDeparture;
     }).sort((a, b) => b.controlNo.localeCompare(a.controlNo));
-  }, [data, search, filterType, filterVoyage, startMonth, endMonth, filterAnomaly, colFilters, monthsList]);
+  }, [allVessels, search, filterType, filterVoyage, startMonth, endMonth, filterAnomaly, colFilters, monthsList]);
 
   const arrivingVessels = useMemo(() => {
-    return data
+    return allVessels
       .filter(v => v.status.toLowerCase().includes('arriving') || v.status.toLowerCase().includes('expected') || v.status.toLowerCase().includes('anchorage') || v.status.toLowerCase().includes('port') || v.status.toLowerCase().includes('berthed'))
       .sort((a, b) => new Date(b.arrivalDate).getTime() - new Date(a.arrivalDate).getTime())
       .slice(0, 15);
-  }, [data]);
+  }, [allVessels]);
 
   const stats = useMemo<SummaryStats>(() => {
     const vesselTypes: Record<string, number> = {};
@@ -366,7 +452,7 @@ export default function App() {
     }
 
     // Find the first status string that matches the category to select it in the dropdown
-    const match = data.find(v => {
+    const match = allVessels.find(v => {
       const status = v.status.toLowerCase();
       if (type === 'atAnchorage') return status.includes('anchorage');
       if (type === 'arriving') return status.includes('arriving') || status.includes('expected');
@@ -378,12 +464,12 @@ export default function App() {
     }
   };
 
-  const uniqueVoyages = useMemo(() => Array.from(new Set(data.map(v => v.voyageType))).sort(), [data]);
+  const uniqueVoyages = useMemo(() => Array.from(new Set(allVessels.map(v => v.voyageType))).sort(), [allVessels]);
 
-  const uniqueTypes = useMemo(() => Array.from(new Set(data.map(v => v.vesselType))).sort(), [data]);
-  const uniqueTerminals = useMemo(() => Array.from(new Set(data.map(v => v.terminal))).sort(), [data]);
-  const uniqueOrigins = useMemo(() => Array.from(new Set(data.map(v => v.origin))).sort(), [data]);
-  const uniqueStatuses = useMemo(() => Array.from(new Set(data.map(v => v.status))).sort(), [data]);
+  const uniqueTypes = useMemo(() => Array.from(new Set(allVessels.map(v => v.vesselType))).sort(), [allVessels]);
+  const uniqueTerminals = useMemo(() => Array.from(new Set(allVessels.map(v => v.terminal))).sort(), [allVessels]);
+  const uniqueOrigins = useMemo(() => Array.from(new Set(allVessels.map(v => v.origin))).sort(), [allVessels]);
+  const uniqueStatuses = useMemo(() => Array.from(new Set(allVessels.map(v => v.status))).sort(), [allVessels]);
 
   const chartData = useMemo(() => {
     return Object.entries(stats.vesselTypes)
@@ -401,12 +487,12 @@ export default function App() {
 
   if (authRole === null) {
     return <LoginForm onLogin={(role, email) => {
-      localStorage.setItem('auth_role', role);
+      safeStorage.setItem('auth_role', role);
       if (email) {
-        localStorage.setItem('auth_email', email);
+        safeStorage.setItem('auth_email', email);
         setUserEmail(email);
       } else {
-        localStorage.removeItem('auth_email');
+        safeStorage.removeItem('auth_email');
         setUserEmail(null);
       }
       setAuthRole(role);
@@ -438,32 +524,49 @@ export default function App() {
       onLogout={() => {
         setAuthRole(null);
         setUserEmail(null);
-        localStorage.removeItem('auth_role');
-        localStorage.removeItem('auth_email');
+        safeStorage.removeItem('auth_role');
+        safeStorage.removeItem('auth_email');
         googleLogout();
       }} 
-      onSubmitApp={async (app) => {
+      onSubmitApp={async (app, originalId) => {
         try {
-          const existingApp = applications.find(a => a.id === (app as any).id);
+          const lookupId = originalId || (app as any).id;
+          // Use case-insensitive lookup to find the existing application record
+          const existingApp = lookupId 
+            ? applications.find(a => a.id.toUpperCase() === lookupId.toUpperCase()) 
+            : undefined;
+          
+          const nowIso = new Date().toISOString();
+          const finalId = (app as any).id || (app.vesselName || 'APP').replace(/\s+/g, '-').toUpperCase() + '-' + Date.now();
           const fullApp = {
             ...app,
-            id: (app as any).id || (app.vesselName || 'APP').replace(/\s+/g, '-').toUpperCase() + '-' + Date.now(),
+            id: finalId,
             userEmail: userEmail || 'user@example.com',
-            createdAt: existingApp ? existingApp.createdAt : new Date().toISOString(),
+            createdAt: existingApp ? existingApp.createdAt : nowIso,
+            submittedAt: existingApp ? (existingApp.submittedAt || existingApp.createdAt) : nowIso,
             status: existingApp ? existingApp.status : 'Pending Check'
           } as VesselApplication;
 
-          const { saveApplicationToFirestore } = await import('./services/firebaseService');
+          const { saveApplicationToFirestore, deleteApplicationFromFirestore } = await import('./services/firebaseService');
           await saveApplicationToFirestore(fullApp);
           
+          // Clean up old document if the ID has changed or if it existed under a different case variant
+          if (lookupId && lookupId.toUpperCase() !== finalId.toUpperCase()) {
+            console.log(`Cleaning up old/renamed application record: ${lookupId} -> ${finalId}`);
+            const targetsToClean = applications.filter(a => a.id.toUpperCase() === lookupId.toUpperCase() && a.id !== finalId);
+            for (const oldApp of targetsToClean) {
+              await deleteApplicationFromFirestore(oldApp.id);
+            }
+          }
+          
           if (existingApp) {
-            alert('Successfully updated your application!');
+            safeAlert('Successfully updated your application!');
           } else {
-            alert('Successfully submitted application! It is now routed to the Port Checker for review.');
+            safeAlert('Successfully submitted application! It is now routed to the Port Checker for review.');
           }
         } catch (error: any) {
           console.error("Submission failed:", error);
-          alert(`Failed to save application: ${error.message}`);
+          safeAlert(`Failed to save application: ${error.message}`);
         }
       }}
       onDeleteApp={async (id) => {
@@ -484,6 +587,7 @@ export default function App() {
         usedControlNumbers: [
           ...data.map(d => (d.controlNo || '').replace(/-(F|D|P)$/i, '')),
           ...(paymentData?.ancillaryRecords || []).map(r => (r.controlNo || '')),
+          ...(paymentData?.pgpControlNumbers || []),
           ...applications.map(a => (a.id || '').replace(/-(F|D|P)$/i, ''))
         ]
       }} 
@@ -532,8 +636,8 @@ export default function App() {
                 onClick={() => {
                   setAuthRole(null);
                   setUserEmail(null);
-                  localStorage.removeItem('auth_role');
-                  localStorage.removeItem('auth_email');
+                  safeStorage.removeItem('auth_role');
+                  safeStorage.removeItem('auth_email');
                   handleGoogleLogout();
                 }}
                 className="flex items-center gap-1 px-2 py-1 text-xs text-red-600 hover:bg-red-50 rounded-md transition-colors font-bold uppercase tracking-wider cursor-pointer font-sans"
@@ -546,8 +650,8 @@ export default function App() {
           </div>
 
           {/* Row 2: Port Control Navigation Deck (Highly Visible, color-themed tabs for mobile & desktop) */}
-          <div className="w-full">
-            <nav className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200/80 overflow-x-auto w-full no-scrollbar relative shadow-inner">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 w-full">
+            <nav className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200/80 overflow-x-auto w-full lg:w-auto no-scrollbar relative shadow-inner flex-1">
               {[
                 { id: 'vessels', label: 'Vessels', icon: LayoutDashboard, colorClass: 'text-fab-blue', activeBorder: 'border-fab-blue', bgActive: 'bg-fab-blue/5', beacon: 'bg-fab-blue' },
                 { id: 'payments', label: 'Payments', icon: CreditCard, colorClass: 'text-fab-green', activeBorder: 'border-fab-green', bgActive: 'bg-fab-green/5', beacon: 'bg-fab-green' },
@@ -596,12 +700,9 @@ export default function App() {
                 );
               })}
             </nav>
-          </div>
 
-          {/* Row 3: Live Filters / Date Selections (Active when applicable) */}
-          {activeTab === 'vessels' && (
-            <div className="w-full flex justify-end">
-              <div className="flex items-center border border-slate-200 rounded-lg bg-slate-50/80 px-2.5 py-1.5 gap-1.5 shadow-2xs hover:border-fab-blue/30 transition-all max-w-full sm:max-w-xs">
+            {activeTab === 'vessels' && (
+              <div className="flex items-center self-end lg:self-auto border border-slate-200 rounded-xl bg-slate-50/80 px-3 py-1.5 gap-1.5 shadow-2xs hover:border-fab-blue/30 transition-all max-w-full">
                 <History className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                 <span className="text-[9px] font-bold uppercase text-slate-400 select-none whitespace-nowrap">Period:</span>
                 <select 
@@ -624,8 +725,8 @@ export default function App() {
                   ))}
                 </select>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
         </div>
       </header>
@@ -659,7 +760,7 @@ export default function App() {
               className="space-y-6"
             >
               {/* Stats Grid */}
-              <section className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6">
+              <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5">
                 <StatCard 
                   label="Total Vessels" 
                   value={stats.total} 
@@ -703,183 +804,7 @@ export default function App() {
                   trend={stats.criticalCount && stats.criticalCount > 0 ? `${stats.criticalCount} CRIT` : undefined}
                 />
               </section>
-
-              {/* Full Table View */}
-              <section className="border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden relative">
-                <div className="overflow-x-auto max-h-[600px] no-scrollbar">
-                  <table className="w-full text-left border-collapse min-w-[1000px]">
-                    <thead className="sticky top-0 z-10">
-                      <tr className="bg-fab-blue text-white shadow-sm">
-                        <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">ID</th>
-                        <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Vessel Name</th>
-                        <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Voyage Type</th>
-                        <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Terminal</th>
-                        <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Load Volume (MT/CBM)</th>
-                        <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Cargo Description</th>
-                        <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Status</th>
-                        <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Arrival</th>
-                        <th className="p-4 text-[10px] font-bold uppercase tracking-wider">Departure</th>
-                      </tr>
-                      <tr className="bg-slate-50 border-b border-slate-200">
-                        <td className="p-2 border-r border-slate-200">
-                          <input 
-                            type="text" 
-                            placeholder="ID..." 
-                            className="w-full text-[10px] p-1.5 bg-white border border-slate-200 rounded text-fab-blue uppercase font-bold focus:outline-none focus:border-fab-blue"
-                            value={colFilters.id}
-                            onChange={(e) => setColFilters(prev => ({ ...prev, id: e.target.value }))}
-                          />
-                        </td>
-                        <td className="p-2 border-r border-slate-200">
-                          <input 
-                            type="text" 
-                            placeholder="NAME..." 
-                            className="w-full text-[10px] p-1.5 bg-white border border-slate-200 rounded text-fab-blue uppercase font-bold focus:outline-none focus:border-fab-blue"
-                            value={colFilters.name}
-                            onChange={(e) => setColFilters(prev => ({ ...prev, name: e.target.value }))}
-                          />
-                        </td>
-                        <td className="p-2 border-r border-slate-200">
-                          <select 
-                            className="w-full text-[10px] p-1.5 bg-white border border-slate-200 rounded text-fab-blue font-bold uppercase focus:outline-none"
-                            value={colFilters.orientation}
-                            onChange={(e) => setColFilters(prev => ({ ...prev, orientation: e.target.value }))}
-                          >
-                            <option value="All">All</option>
-                            <option value="Foreign">Foreign</option>
-                            <option value="Domestic">Domestic</option>
-                          </select>
-                        </td>
-                        <td className="p-2 border-r border-slate-200">
-                          <select 
-                            className="w-full text-[10px] p-1.5 bg-white border border-slate-200 rounded text-fab-blue font-bold uppercase focus:outline-none"
-                            value={colFilters.terminal}
-                            onChange={(e) => setColFilters(prev => ({ ...prev, terminal: e.target.value }))}
-                          >
-                            <option value="All">All</option>
-                            {uniqueTerminals.map(t => <option key={t} value={t}>{t}</option>)}
-                          </select>
-                        </td>
-                        <td className="p-2 border-r border-slate-200">
-                          <input 
-                            type="text" 
-                            placeholder="LOAD..." 
-                            className="w-full text-[10px] p-1.5 bg-white border border-slate-200 rounded text-fab-blue uppercase font-bold focus:outline-none focus:border-fab-blue"
-                            value={colFilters.loadVolume}
-                            onChange={(e) => setColFilters(prev => ({ ...prev, loadVolume: e.target.value }))}
-                          />
-                        </td>
-                        <td className="p-2 border-r border-slate-200">
-                          <input 
-                            type="text" 
-                            placeholder="CARGO..." 
-                            className="w-full text-[10px] p-1.5 bg-white border border-slate-200 rounded text-fab-blue uppercase font-bold focus:outline-none focus:border-fab-blue"
-                            value={colFilters.cargoDesc}
-                            onChange={(e) => setColFilters(prev => ({ ...prev, cargoDesc: e.target.value }))}
-                          />
-                        </td>
-                        <td className="p-2 border-r border-slate-200">
-                          <select 
-                            className="w-full text-[10px] p-1.5 bg-white border border-slate-200 rounded text-fab-blue font-bold uppercase focus:outline-none"
-                            value={colFilters.status}
-                            onChange={(e) => setColFilters(prev => ({ ...prev, status: e.target.value }))}
-                          >
-                            <option value="All">All</option>
-                            {uniqueStatuses.map(s => <option key={s} value={s}>{s}</option>)}
-                          </select>
-                        </td>
-                        <td className="p-2 border-r border-slate-200">
-                          <input 
-                            type="text" 
-                            placeholder="ARRIVAL..." 
-                            className="w-full text-[10px] p-1.5 bg-white border border-slate-200 rounded text-fab-blue uppercase font-bold focus:outline-none focus:border-fab-blue"
-                            value={colFilters.arrival}
-                            onChange={(e) => setColFilters(prev => ({ ...prev, arrival: e.target.value }))}
-                          />
-                        </td>
-                        <td className="p-2">
-                          <input 
-                            type="text" 
-                            placeholder="DEPARTURE..." 
-                            className="w-full text-[10px] p-1.5 bg-white border border-slate-200 rounded text-fab-blue uppercase font-bold focus:outline-none focus:border-fab-blue"
-                            value={colFilters.departure}
-                            onChange={(e) => setColFilters(prev => ({ ...prev, departure: e.target.value }))}
-                          />
-                        </td>
-                      </tr>
-                    </thead>
-                    <tbody className="text-[11px] uppercase">
-                      {paginatedData.map((v, i) => {
-                        const vAnomalies = detectVesselAnomalies(v);
-                        const vHasErrors = vAnomalies.some(a => a.level === 'error');
-                        const vHasWarnings = vAnomalies.some(a => a.level === 'warning');
-                        const vHasInfos = vAnomalies.some(a => a.level === 'info');
-
-                        return (
-                          <tr 
-                            key={`${v.controlNo}-${i}`} 
-                            className={cn("border-b border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors", i % 2 === 0 ? "bg-white" : "bg-slate-50")}
-                            onClick={() => setSelectedVessel(v)}
-                          >
-                            <td className="p-4 font-mono border-r border-slate-100 text-slate-400">{v.controlNo}</td>
-                            <td className="p-4 font-bold border-r border-slate-100 text-fab-blue">
-                              <div className="flex items-center gap-1.5 justify-between">
-                                <span className="truncate max-w-[170px]">{v.vesselName}</span>
-                                {vAnomalies.length > 0 && (
-                                  <div className="flex gap-1 flex-shrink-0">
-                                    {vHasErrors && (
-                                      <span title="Critical Integrity Issue Detected" className="p-0.5 bg-red-100 rounded text-red-600">
-                                        <AlertCircle className="w-3.5 h-3.5" />
-                                      </span>
-                                    )}
-                                    {vHasWarnings && (
-                                      <span title="Operational Warning Detected" className="p-0.5 bg-amber-100 rounded text-amber-600">
-                                        <AlertTriangle className="w-3.5 h-3.5" />
-                                      </span>
-                                    )}
-                                    {vHasInfos && (
-                                      <span title="Diagnostic Notice" className="p-0.5 bg-blue-100 rounded text-blue-600">
-                                        <Info className="w-3.5 h-3.5" />
-                                      </span>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                          <td className="p-4 border-r border-slate-100">
-                            <span className={cn(
-                              "px-2 py-0.5 rounded-full text-[9px] font-bold border",
-                              v.orientation === 'Foreign' ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-indigo-50 text-indigo-600 border-indigo-200"
-                            )}>
-                              {v.orientation}
-                            </span>
-                          </td>
-                          <td className="p-4 border-r border-slate-100 text-[#141414] font-medium text-right">{v.terminal}</td>
-                          <td className="p-4 border-r border-slate-100 text-right font-mono text-slate-600">
-                            {v.cargoVolumeCBM && v.cargoVolumeCBM > 0 ? (
-                              <span>{Math.round(v.cargoVolumeCBM).toLocaleString()}<span className="text-[9px] text-slate-400 ml-1 font-normal select-none">CBM</span></span>
-                            ) : v.cargoVolumeMT && v.cargoVolumeMT > 0 ? (
-                              <span>{Math.round(v.cargoVolumeMT).toLocaleString()}<span className="text-[9px] text-slate-400 ml-1 font-normal select-none">MT</span></span>
-                            ) : '-'}
-                          </td>
-                          <td className="p-4 border-r border-slate-100 text-slate-600 text-[10px]">{v.cargoDescription || '-'}</td>
-                          <td className="p-4 border-r border-slate-100">
-                            <span className={cn(
-                              "px-2 py-0.5 rounded-full text-[9px] font-bold border",
-                              v.status.toLowerCase().includes('departed') ? "bg-green-50 text-green-600 border-green-200" : "bg-fab-gold/10 text-fab-gold border-fab-gold/30"
-                            )}>
-                              {v.status}
-                            </span>
-                          </td>
-                          <td className="p-4 border-r border-slate-100 text-slate-400 font-mono italic">{formatSystemDate(v.arrivalDate)}</td>
-                          <td className="p-4 text-slate-400 font-mono italic">{v.departureDate ? formatSystemDate(v.departureDate) : '-'}</td>
-                        </tr>
-                      );
-                    })}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
+              <VesselTable paginatedData={paginatedData} colFilters={colFilters} setColFilters={setColFilters} uniqueTerminals={uniqueTerminals} uniqueStatuses={uniqueStatuses} setSelectedVessel={setSelectedVessel} />
 
               {/* Pagination Controls */}
               <div className="flex flex-col md:flex-row items-center justify-between p-6 bg-white border border-t-0 border-slate-200 rounded-b-xl shadow-sm">
@@ -1036,27 +961,48 @@ export default function App() {
 
                     let sheetSyncSuccess = false;
                     let sheetErrorMsg = '';
+                    let finalAppId = extraFields?.id || id;
                     if (newStatus === 'Approved' && currentApp) {
                       try {
-                        // Dynamically append directly. If not logged in yet, it will prompt the google connection pop-up automatically!
-                        await appendApplicationToSheet({ ...currentApp, ...extraFields, status: 'Approved' });
+                        const syncResult = await appendApplicationToSheet({ ...currentApp, ...extraFields, status: 'Approved', id: finalAppId });
                         sheetSyncSuccess = true;
+                        if (syncResult && syncResult.finalControlNo) {
+                          finalAppId = syncResult.finalControlNo;
+                        }
                       } catch (error: any) {
-                        console.error('Failed to append to Google Sheets during approval:', error);
-                        sheetErrorMsg = error?.message || 'Connection popup was closed or authentication failed.';
+                        console.warn('Failed to append to Google Sheets during approval:', error);
+                        sheetErrorMsg = error?.message || 'Authentication or connection failed.';
                       }
                     }
 
                     const { updateApplicationInFirestore } = await import('./services/firebaseService');
-                    await updateApplicationInFirestore(id, { status: newStatus, ...extraFields });
+                    await updateApplicationInFirestore(id, { status: newStatus, ...extraFields, id: finalAppId });
                     
                     if (newStatus === 'Approved') {
                       if (sheetSyncSuccess) {
                         safeAlert('Application approved and successfully recorded in the Google Sheets database!');
                       } else {
-                        safeAlert(`Application approved successfully in the Portal database!\n\n(Notice: Google Sheets ledger syncing was bypassed or failed: ${sheetErrorMsg})`);
+                        safeAlert(`Application approved successfully in the Portal database!\n\n(Notice: Google Sheets ledger syncing was bypassed: ${sheetErrorMsg})`);
                       }
                       // Instantly re-fetch newest rows from Google Sheets
+                      await fetchData(false);
+                    } else if (newStatus !== 'Approved' && currentApp && currentApp.status === 'Approved') {
+                      let sheetDeleteMsg = '';
+                      let sheetDeleteSuccess = false;
+                      try {
+                        await deleteApplicationFromSheet(currentApp);
+                        sheetDeleteSuccess = true;
+                      } catch (error: any) {
+                        console.warn('Failed to delete from Google Sheets during revert/rejection:', error);
+                        sheetDeleteMsg = error?.message || 'Failed to authenticate or connect.';
+                      }
+                      
+                      if (sheetDeleteSuccess) {
+                        safeAlert('Application status updated and corresponding record successfully removed from Google Sheets!');
+                      } else {
+                        safeAlert(`Application status updated successfully in the Portal!\n\n(Notice: Google Sheets record could not be removed automatically: ${sheetDeleteMsg})`);
+                      }
+                      // Refresh data
                       await fetchData(false);
                     } else if (newStatus === 'Pending Check') {
                       safeAlert('Application status reverted back to Port Checker review queue, clearing any prior officer sign-off signatures!');
@@ -1067,8 +1013,23 @@ export default function App() {
                   }
                 }} 
                 onUpdateApp={async (id, updatedApp) => {
+                  const currentApp = applications.find(a => a.id === id);
+                  const mergedApp = { ...currentApp, ...updatedApp };
+
                   const { updateApplicationInFirestore } = await import('./services/firebaseService');
                   await updateApplicationInFirestore(id, updatedApp);
+
+                  // Sync to Google Sheets if it is already approved
+                  if (mergedApp.status === 'Approved') {
+                    const hasToken = !!(await getAccessToken());
+                    if (hasToken) {
+                      try {
+                        await appendApplicationToSheet(mergedApp as VesselApplication);
+                      } catch (error: any) {
+                        console.warn('Failed to update Google Sheets during app edit:', error);
+                      }
+                    }
+                  }
                 }}
                 onDeleteApp={async (id) => {
                   try {
@@ -1086,8 +1047,9 @@ export default function App() {
                   terminals: uniqueTerminals,
                   origins: uniqueOrigins,
                   usedControlNumbers: [
-                    ...data.map(d => (d.controlNo || '').replace(/-(F|D|P)$/i, '')),
+                    ...allVessels.map(d => (d.controlNo || '').replace(/-(F|D|P)$/i, '')),
                     ...(paymentData?.ancillaryRecords || []).map(r => (r.controlNo || '')),
+                    ...(paymentData?.pgpControlNumbers || []),
                     ...applications.map(a => (a.id || '').replace(/-(F|D|P)$/i, ''))
                   ]
                 }}
@@ -1100,7 +1062,7 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
             >
-              {paymentData && <PaymentDashboard data={paymentData} />}
+              {paymentData && <PaymentDashboard data={paymentData} vesselData={allVessels} />}
             </motion.div>
           ) : activeTab === 'cargo' ? (
             <motion.div
@@ -1109,7 +1071,7 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
             >
-              <CargoDashboard data={data} />
+              <CargoDashboard data={allVessels} />
             </motion.div>
           ) : activeTab === 'stats' ? (
             <motion.div
@@ -1118,301 +1080,14 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
             >
-              <StatisticsDashboard data={data} onVesselSelect={setSelectedVessel} />
+              <StatisticsDashboard data={allVessels} onVesselSelect={setSelectedVessel} />
             </motion.div>
           ) : null}
         </AnimatePresence>
       </main>
 
-      {/* Vessel Detail Drawer/Modal */}
-      <AnimatePresence>
-        {selectedVessel && (
-          <>
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSelectedVessel(null)}
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100]"
-            />
-            <motion.div 
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              className="fixed right-0 top-0 bottom-0 w-full max-w-xl bg-[#E4E3E0] border-l-2 border-[#141414] z-[101] overflow-y-auto"
-            >
-              <div className="p-8">
-                <div className="flex justify-between items-start mb-8">
-                  <div>
-                    <span className="text-xs font-mono opacity-50 uppercase tracking-widest">{selectedVessel.controlNo}</span>
-                    <h2 className="text-4xl font-bold tracking-tighter uppercase leading-tight">{selectedVessel.vesselName}</h2>
-                  </div>
-                  <button 
-                    onClick={() => setSelectedVessel(null)}
-                    className="p-2 hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors"
-                  >
-                    <X className="w-6 h-6" />
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-8 mb-12">
-                  <DetailItem label="Vessel Type" value={selectedVessel.vesselType} icon={Ship} />
-                  <DetailItem label="Status" value={selectedVessel.status} icon={Navigation} />
-                  <DetailItem label="Registry" value={selectedVessel.registry} icon={Globe} />
-                  <DetailItem label="Gross Tonnage" value={selectedVessel.gt.toLocaleString()} icon={TRENDING_UP} />
-                  <DetailItem label="Origin Port" value={selectedVessel.origin} icon={Anchor} />
-                  <DetailItem label="Next Destination" value={selectedVessel.nextPort} icon={Navigation} />
-                  <DetailItem label="Agent" value={selectedVessel.agent} icon={Users} />
-                  <DetailItem label="Terminal" value={selectedVessel.terminal} icon={ChevronRight} />
-                </div>
-
-                <div className="space-y-6">
-                  {/* Automated Anomaly Detection Panel */}
-                  {(() => {
-                    const vesselAnomalies = detectVesselAnomalies(selectedVessel);
-                    return (
-                      <div className="border border-[#141414] p-6 bg-white shadow-[4px_4px_0px_0px_#141414]">
-                        <h4 className="text-[10px] font-mono uppercase tracking-[0.2em] opacity-40 mb-4 flex items-center gap-2">
-                          <ShieldAlert className="w-4 h-4 text-fab-blue" /> Health Diagnostic Checks
-                        </h4>
-                        
-                        {vesselAnomalies.length === 0 ? (
-                          <div className="flex items-center gap-3 p-3 bg-green-50 border border-green-200 text-green-800 rounded-lg">
-                            <AlertCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
-                            <div>
-                              <p className="text-xs font-bold uppercase tracking-wide">Vessel Health Record: Normal</p>
-                              <p className="text-[10px] opacity-75">No automated operational anomalies, data mismatches, or efficiency alerts were identified for this transit.</p>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="space-y-3">
-                            <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
-                              {vesselAnomalies.length} Automated Flag(s) Identified
-                            </div>
-                            <div className="space-y-2.5">
-                              {vesselAnomalies.map((a, idx) => {
-                                const isError = a.level === 'error';
-                                const isWarning = a.level === 'warning';
-                                return (
-                                  <div 
-                                    key={idx} 
-                                    className={cn(
-                                      "border p-3 rounded-lg flex gap-3 transition-colors",
-                                      isError ? "bg-red-50/50 border-red-200 text-red-950" :
-                                      isWarning ? "bg-amber-50/50 border-amber-200 text-amber-950" :
-                                      "bg-blue-50/50 border-blue-200 text-blue-950"
-                                    )}
-                                  >
-                                    <div className="mt-0.5 flex-shrink-0">
-                                      {isError ? <AlertCircle className="w-4 h-4 text-red-600" /> :
-                                       isWarning ? <AlertTriangle className="w-4 h-4 text-amber-600" /> :
-                                       <Info className="w-4 h-4 text-blue-600" />}
-                                    </div>
-                                    <div className="space-y-0.5 w-full">
-                                      <div className="flex items-center justify-between gap-1.5 flex-wrap w-full">
-                                        <h5 className="text-xs font-extrabold uppercase tracking-tight">{a.title}</h5>
-                                        <span className={cn(
-                                          "px-1.5 py-0.2 rounded text-[8px] font-black uppercase tracking-wider",
-                                          isError ? "bg-red-250 text-red-800" :
-                                          isWarning ? "bg-amber-250 text-amber-800" :
-                                          "bg-blue-250 text-blue-800"
-                                        )}>
-                                          {a.category}
-                                        </span>
-                                      </div>
-                                      <p className="text-[10px] leading-relaxed opacity-85">{a.message}</p>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  <div className="border border-[#141414] p-6 bg-white">
-                    <h4 className="text-[10px] font-mono uppercase tracking-[0.2em] opacity-40 mb-4 flex items-center gap-2">
-                       <Package className="w-3 h-3" /> Cargo Information
-                    </h4>
-                    <div className="space-y-4">
-                      <div>
-                        <p className="text-xs opacity-50 mb-1">Description</p>
-                        <p className="font-bold text-lg uppercase tracking-tight">{selectedVessel.cargoDescription || 'NONE REPORTED'}</p>
-                      </div>
-                      <div className="flex gap-8 flex-wrap">
-                        {selectedVessel.cargoVolumeMT > 0 && (
-                          <div>
-                            <p className="text-xs opacity-50 mb-1">Volume (MT)</p>
-                            <p className="font-mono text-xl">{selectedVessel.cargoVolumeMT.toLocaleString()}</p>
-                          </div>
-                        )}
-                        {selectedVessel.cargoVolumeCBM > 0 && (
-                          <div>
-                            <p className="text-xs opacity-50 mb-1">Volume (CBM)</p>
-                            <p className="font-mono text-xl text-amber-600">{selectedVessel.cargoVolumeCBM.toLocaleString()}</p>
-                          </div>
-                        )}
-                        <div>
-                          <p className="text-xs opacity-50 mb-1">Shipment Type</p>
-                          <p className="font-mono uppercase">{selectedVessel.shipmentKind || 'N/A'}</p>
-                        </div>
-                      </div>
-
-                      {(() => {
-                        const parseVesselDate = (dateStr: string) => {
-                          if (!dateStr) return new Date(0);
-                          const parts = dateStr.split('-');
-                          if (parts.length === 3) {
-                            const day = parseInt(parts[0], 10);
-                            const mStr = parts[1].toLowerCase();
-                            const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-                            const monthIdx = monthNames.findIndex(m => mStr.startsWith(m));
-                            let year = parseInt(parts[2], 10);
-                            if (year < 100) year += 2000;
-                            if (monthIdx !== -1 && !isNaN(day) && !isNaN(year)) {
-                              return new Date(year, monthIdx, day);
-                            }
-                          }
-                          const parsed = new Date(dateStr);
-                          return isNaN(parsed.getTime()) ? new Date(0) : parsed;
-                        };
-
-                        const historicalVoyages = data
-                          .filter(v => v.vesselName.toLowerCase() === selectedVessel.vesselName.toLowerCase())
-                          .sort((a, b) => parseVesselDate(a.arrivalDate).getTime() - parseVesselDate(b.arrivalDate).getTime())
-                          .slice(-5)
-                          .map(v => ({
-                            voyageNo: v.voyageNo || 'N/A',
-                            volumeMT: v.cargoVolumeMT || 0,
-                            volumeCBM: v.cargoVolumeCBM || 0,
-                            label: v.voyageNo ? `V-${v.voyageNo}` : 'N/A',
-                          }));
-
-                        const hasMT = historicalVoyages.some(v => v.volumeMT > 0);
-                        const hasCBM = historicalVoyages.some(v => v.volumeCBM > 0);
-
-                        if (historicalVoyages.length === 0 || (!hasMT && !hasCBM)) return null;
-
-                        return (
-                          <div className="pt-4 border-t border-slate-100 mt-2">
-                            <p className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mb-2">Voyage Cargo History (Last 5 Voyages)</p>
-                            <div className="h-28 w-full">
-                              <ResponsiveContainer width="100%" height="100%">
-                                <LineChart data={historicalVoyages} margin={{ top: 5, right: 10, left: -25, bottom: 5 }}>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                                  <XAxis dataKey="label" fontSize={8} stroke="#94a3b8" />
-                                  <YAxis fontSize={8} stroke="#94a3b8" />
-                                  <Tooltip 
-                                    contentStyle={{ backgroundColor: '#141414', border: 'none', color: '#FFFFFF', fontSize: '9px', padding: '6px' }}
-                                    itemStyle={{ color: '#FFFFFF', padding: '2px 0' }}
-                                    labelStyle={{ fontWeight: 'bold', color: '#94a3b8', marginBottom: '2px' }}
-                                  />
-                                  {hasMT && (
-                                    <Line 
-                                      type="monotone" 
-                                      dataKey="volumeMT" 
-                                      name="Vol (MT)" 
-                                      stroke="#004a99" 
-                                      strokeWidth={2} 
-                                      dot={{ r: 3 }} 
-                                      activeDot={{ r: 5 }} 
-                                    />
-                                  )}
-                                  {hasCBM && (
-                                    <Line 
-                                      type="monotone" 
-                                      dataKey="volumeCBM" 
-                                      name="Vol (CBM)" 
-                                      stroke="#d97706" 
-                                      strokeWidth={2} 
-                                      dot={{ r: 3 }} 
-                                      activeDot={{ r: 5 }} 
-                                    />
-                                  )}
-                                </LineChart>
-                              </ResponsiveContainer>
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </div>
-
-                  <div className="border border-[#141414] p-6 bg-[#141414] text-[#E4E3E0]">
-                    <h4 className="text-[10px] font-mono uppercase tracking-[0.2em] opacity-40 mb-4">Operational Logs</h4>
-                    <ul className="space-y-3 font-mono text-[10px] uppercase">
-                      <li className="flex justify-between border-b border-[#E4E3E022] pb-2">
-                        <span className="opacity-60">Arrival Date</span>
-                        <span>{formatSystemDate(selectedVessel.arrivalDate)}</span>
-                      </li>
-                      <li className="flex justify-between border-b border-[#E4E3E022] pb-2">
-                        <span className="opacity-60">Departure Date</span>
-                        <span>{formatSystemDate(selectedVessel.departureDate)}</span>
-                      </li>
-                      <li className="flex justify-between border-b border-[#E4E3E022] pb-2">
-                        <span className="opacity-60">Voyage No</span>
-                        <span>{selectedVessel.voyageNo}</span>
-                      </li>
-                      <li className="flex justify-between border-b border-[#E4E3E022] pb-2">
-                        <span className="opacity-60">Motorized</span>
-                        <span>{selectedVessel.motorized}</span>
-                      </li>
-                      <li className="flex justify-between">
-                        <span className="opacity-60">Passengers</span>
-                        <span>{selectedVessel.passengers}</span>
-                      </li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      <VesselDetailDrawer selectedVessel={selectedVessel} setSelectedVessel={setSelectedVessel} data={data} />
     </div>
   );
 }
-
-function StatCard({ label, value, icon: Icon, trend, onClick, className }: { label: string, value: string | number, icon: any, trend?: string, onClick?: () => void, className?: string }) {
-  return (
-    <div 
-      className={cn(
-        "border border-slate-200 rounded-xl p-5 bg-white hover:border-fab-blue/50 hover:shadow-xl transition-all group cursor-pointer",
-        onClick && "active:scale-95",
-        className
-      )}
-      onClick={onClick}
-    >
-      <div className="flex justify-between items-start mb-6">
-        <div className="bg-fab-blue/5 p-2 rounded-lg group-hover:bg-fab-blue transition-colors">
-          <Icon className="w-5 h-5 text-fab-blue group-hover:text-white" />
-        </div>
-        {trend && <span className="text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">{trend}</span>}
-      </div>
-      <div className="space-y-1">
-        <h3 className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">{label}</h3>
-        <p className="text-3xl font-black tracking-tight text-fab-blue">{value}</p>
-      </div>
-    </div>
-  );
-}
-
-function DetailItem({ label, value, icon: Icon }: { label: string, value: string | number, icon: any }) {
-  return (
-    <div className="flex gap-3">
-      <div className="mt-1">
-        <Icon className="w-4 h-4 opacity-30" />
-      </div>
-      <div>
-        <p className="text-[10px] font-mono uppercase opacity-40 mb-0.5">{label}</p>
-        <p className="font-bold text-sm uppercase tracking-tight">{value || 'N/A'}</p>
-      </div>
-    </div>
-  );
-}
-
-// Fixed typo in icon reference
-const TRENDING_UP = TrendingUp;
 

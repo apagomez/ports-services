@@ -62,10 +62,10 @@ export const ProcessMonitoringReport: React.FC<ProcessMonitoringReportProps> = (
   applications,
   onBack 
 }) => {
-  const [activeFormType, setActiveFormType] = useState<'VEP' | 'PAS'>('VEP');
+  const [activeFormType, setActiveFormType] = useState<'VEP' | 'PAS' | 'PGP'>('VEP');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMonth, setSelectedMonth] = useState('All');
-  const [serviceFilter, setServiceFilter] = useState<'All' | 'DOMESTIC' | 'FOREIGN'>('All');
+  const [serviceFilter, setServiceFilter] = useState<string>('All');
 
   const monthNames = [
     "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", 
@@ -98,7 +98,7 @@ export const ProcessMonitoringReport: React.FC<ProcessMonitoringReportProps> = (
     return formatSystemDate(dateObj);
   };
 
-  // Filter applications by active form/service type (VEP vs PAS) and ensure only Approved applications are present
+  // Filter applications by active form/service type (VEP vs PAS vs PGP) and ensure only Approved applications are present
   const filteredAppsByType = useMemo(() => {
     return applications.filter(app => {
       if (app.status !== 'Approved') {
@@ -106,8 +106,10 @@ export const ProcessMonitoringReport: React.FC<ProcessMonitoringReportProps> = (
       }
       if (activeFormType === 'PAS') {
         return app.applicationType === 'PAS';
+      } else if (activeFormType === 'PGP') {
+        return app.applicationType === 'PGP';
       } else {
-        return app.applicationType !== 'PAS';
+        return app.applicationType !== 'PAS' && app.applicationType !== 'PGP';
       }
     });
   }, [applications, activeFormType]);
@@ -156,9 +158,11 @@ export const ProcessMonitoringReport: React.FC<ProcessMonitoringReportProps> = (
 
         const shortMonthStr = `-${monthNames[createDate.getMonth()].slice(0, 3).charAt(0).toUpperCase()}${monthNames[createDate.getMonth()].slice(0, 3).slice(1).toLowerCase()}-`;
 
-        // Service type (DOMESTIC or FOREIGN for VEP, selected services combined for PAS)
+        // Service type (DOMESTIC or FOREIGN for VEP, selected services combined for PAS, cargo class for PGP)
         const serviceCategoryStr = app.applicationType === 'PAS'
           ? (app.selectedServices && app.selectedServices.length > 0 ? app.selectedServices.join(' | ').toUpperCase() : 'PORT ANCILLARY')
+          : app.applicationType === 'PGP'
+          ? (app.classificationOfCargo || 'BULK CARGO').toUpperCase()
           : (app.voyageType || 'DOMESTIC').toUpperCase();
 
         // Frontline personnel initials
@@ -175,15 +179,19 @@ export const ProcessMonitoringReport: React.FC<ProcessMonitoringReportProps> = (
         let quality = 5;
         if (app.status === 'Rejected') quality = 3;
 
-        const dynamicCtrlPrefix = app.applicationType === 'PAS' ? 'PAS' : 'VEP';
+        const dynamicCtrlPrefix = app.applicationType === 'PAS' ? 'PAS' : app.applicationType === 'PGP' ? 'PGP' : 'VEP';
 
         return {
           index: idx + 1,
           ctrlNo: app.id || `${dynamicCtrlPrefix}-${baseYear}-${idx + 100}-D`,
           typeOfVessel: serviceCategoryStr,
-          nameOfVessel: (app.vesselName || 'MV UNNAMED').toUpperCase(),
+          nameOfVessel: app.applicationType === 'PGP'
+            ? (app.vesselName || app.company || 'N/A').toUpperCase()
+            : (app.vesselName || 'MV UNNAMED').toUpperCase(),
           voyageNo: (app.voyageNo || 'N/A').toUpperCase(),
-          client: (app.serviceProviderName || app.agent || app.shippingLine || 'DIRECT APPLICANT').toUpperCase(),
+          client: app.applicationType === 'PGP'
+            ? (app.company || app.submitterName || app.nameOfRepresentative || 'DIRECT APPLICANT').toUpperCase()
+            : (app.serviceProviderName || app.agent || app.shippingLine || 'DIRECT APPLICANT').toUpperCase(),
           dateOfApplication: formatSheetDate(createDate),
           monthOfApplication: shortMonthStr,
           timeIn1: formatTime(createDate),
@@ -298,16 +306,18 @@ export const ProcessMonitoringReport: React.FC<ProcessMonitoringReportProps> = (
     const row1 = Array(30).fill('').join(',');
     const row2 = activeFormType === 'PAS'
       ? ',,,,,,,,CHECKING OF DOCUMENTS,,,,,,,APPROVAL OF DOCUMENTS,,,,,RELEASING OF PAS,,,,,,,,'
+      : activeFormType === 'PGP'
+      ? ',,,,,,,,CHECKING OF DOCUMENTS,,,,,,,APPROVAL OF DOCUMENTS,,,,,RELEASING OF PGP,,,,,,,,'
       : ',,,,,,,,CHECKING OF DOCUMENTS,,,,,,,APPROVAL OF DOCUMENTS,,,,,RELEASING OF VEP,,,,,,,,';
     const h = [
       '',
       'NO.',
       'NO',
       'CTRL NO',
-      activeFormType === 'PAS' ? 'ANCILLARY SERVICE CATEGORY' : 'TYPE OF VESSEL',
-      'NAME OF VESSEL',
-      activeFormType === 'PAS' ? 'SERVICE REFERENCE' : 'VOYAGE NO.',
-      'CLIENT',
+      activeFormType === 'PAS' ? 'ANCILLARY SERVICE CATEGORY' : activeFormType === 'PGP' ? 'CARGO CLASSIFICATION' : 'TYPE OF VESSEL',
+      activeFormType === 'PGP' ? 'COMPANY NAME / VESSEL' : 'NAME OF VESSEL',
+      activeFormType === 'PAS' ? 'SERVICE REFERENCE' : activeFormType === 'PGP' ? 'VOYAGE NO / REF' : 'VOYAGE NO.',
+      activeFormType === 'PGP' ? 'REPRESENTATIVE / CLIENT' : 'CLIENT',
       'DATE  OF APPLICATION',
       'Month of Application',
       'TIME IN (1)',
@@ -461,6 +471,21 @@ export const ProcessMonitoringReport: React.FC<ProcessMonitoringReportProps> = (
           <FileText className="w-4 h-4" />
           Port Ancillary Services (PAS)
         </button>
+        <button
+          onClick={() => {
+            setActiveFormType('PGP');
+            setServiceFilter('All');
+          }}
+          className={cn(
+            "px-6 py-3 text-xs font-extrabold uppercase tracking-widest border-b-2 transition-all cursor-pointer flex items-center gap-2",
+            activeFormType === 'PGP'
+              ? "border-emerald-600 text-emerald-700 font-black"
+              : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
+          )}
+        >
+          <FileText className="w-4 h-4" />
+          Port Gate Passes (PGP)
+        </button>
       </div>
 
       {/* KPI Dashboards with SLAs */}
@@ -471,7 +496,7 @@ export const ProcessMonitoringReport: React.FC<ProcessMonitoringReportProps> = (
           </div>
           <div>
             <span className="text-[10px] font-black uppercase text-slate-400 block tracking-wider">
-              {activeFormType === 'PAS' ? "Processed Services" : "Processed Permits"}
+              {activeFormType === 'PAS' ? "Processed Services" : activeFormType === 'PGP' ? "Processed Passes" : "Processed Permits"}
             </span>
             <span className="text-2xl font-extrabold text-slate-800">{reportStats.total}</span>
           </div>
@@ -539,8 +564,8 @@ export const ProcessMonitoringReport: React.FC<ProcessMonitoringReportProps> = (
             </select>
           </div>
 
-          {/* Voyage service type */}
-          {activeFormType !== 'PAS' && (
+          {/* Voyage service type for VEP */}
+          {activeFormType === 'VEP' && (
             <select
               value={serviceFilter}
               onChange={(e) => setServiceFilter(e.target.value as any)}
@@ -551,6 +576,21 @@ export const ProcessMonitoringReport: React.FC<ProcessMonitoringReportProps> = (
               <option value="FOREIGN">FOREIGN FLEET</option>
             </select>
           )}
+
+          {/* Cargo service type for PGP */}
+          {activeFormType === 'PGP' && (
+            <select
+              value={serviceFilter}
+              onChange={(e) => setServiceFilter(e.target.value)}
+              className="bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-lg px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-slate-700 focus:outline-none transition-all cursor-pointer"
+            >
+              <option value="All">All Cargo Classifications</option>
+              <option value="BULK CARGO">BULK CARGO</option>
+              <option value="BREAKBULK CARGO">BREAKBULK CARGO</option>
+              <option value="CONTAINERIZED">CONTAINERIZED</option>
+              <option value="GENERAL CARGO">GENERAL CARGO</option>
+            </select>
+          )}
         </div>
 
         {/* Regular search input */}
@@ -558,7 +598,13 @@ export const ProcessMonitoringReport: React.FC<ProcessMonitoringReportProps> = (
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
           <input
             type="text"
-            placeholder="FILTER VESSEL OR AGENT..."
+            placeholder={
+              activeFormType === 'PAS' 
+                ? "FILTER SERVICE OR CLIENT..." 
+                : activeFormType === 'PGP' 
+                ? "FILTER COMPANY OR REPRESENTATIVE..." 
+                : "FILTER VESSEL OR AGENT..."
+            }
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full bg-slate-50 border border-slate-200 rounded-lg py-1.5 pl-9 pr-4 text-xs font-bold uppercase placeholder:text-slate-400 text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all font-sans"
@@ -576,8 +622,8 @@ export const ProcessMonitoringReport: React.FC<ProcessMonitoringReportProps> = (
                 <th colSpan={3} className="px-4 py-2 text-[10px] uppercase tracking-wider font-extrabold text-center bg-[#0d6434]">
                   RECORDS INDEX
                 </th>
-                <th colSpan={6} className="px-4 py-2 text-[10px] uppercase tracking-wider font-extrabold text-center bg-[#0a5129]">
-                  {activeFormType === 'PAS' ? 'ANCILLARY GENERAL METRICS' : 'VESSEL GENERAL METRICS'}
+                 <th colSpan={6} className="px-4 py-2 text-[10px] uppercase tracking-wider font-extrabold text-center bg-[#0a5129]">
+                  {activeFormType === 'PAS' ? 'ANCILLARY GENERAL METRICS' : activeFormType === 'PGP' ? 'GATE PASS GENERAL METRICS' : 'VESSEL GENERAL METRICS'}
                 </th>
                 <th colSpan={5} className="px-4 py-2 text-[10px] uppercase tracking-widest font-extrabold text-center bg-[#107c41]">
                   DOCUMENTS VERIFICATION (CHECKER REVIEW)
@@ -598,10 +644,10 @@ export const ProcessMonitoringReport: React.FC<ProcessMonitoringReportProps> = (
                 <th className="p-2.5 w-12 sticky left-0 bg-[#128a49] text-center z-12">#NO</th>
                 <th className="p-2.5 w-12 text-center">NO.</th>
                 <th className="p-2.5 text-left pl-3">CTRL NO</th>
-                <th className="p-2.5">{activeFormType === 'PAS' ? 'ANCILLARY SERVICE CATEGORY' : 'TYPE OF VESSEL (VOYAGE)'}</th>
-                <th className="p-2.5 text-left pl-3">NAME OF VESSEL</th>
-                <th className="p-2.5">{activeFormType === 'PAS' ? 'SERVICE REFERENCE' : 'VOYAGE NO.'}</th>
-                <th className="p-2.5 text-left pl-3">{activeFormType === 'PAS' ? 'SERVICE PROVIDER / CLIENT' : 'CLIENT (AGENT / LINE)'}</th>
+                <th className="p-2.5">{activeFormType === 'PAS' ? 'ANCILLARY SERVICE CATEGORY' : activeFormType === 'PGP' ? 'CLASSIFICATION OF CARGO' : 'TYPE OF VESSEL (VOYAGE)'}</th>
+                <th className="p-2.5 text-left pl-3">{activeFormType === 'PGP' ? 'COMPANY / VESSEL NAME' : 'NAME OF VESSEL'}</th>
+                <th className="p-2.5">{activeFormType === 'PAS' ? 'SERVICE REFERENCE' : activeFormType === 'PGP' ? 'VOYAGE / REF' : 'VOYAGE NO.'}</th>
+                <th className="p-2.5 text-left pl-3">{activeFormType === 'PAS' ? 'SERVICE PROVIDER / CLIENT' : activeFormType === 'PGP' ? 'REPRESENTATIVE / CLIENT' : 'CLIENT (AGENT / LINE)'}</th>
                 <th className="p-2.5">DATE OF APPLICATION</th>
                 <th className="p-2.5">Month of Application</th>
                 
@@ -714,7 +760,7 @@ export const ProcessMonitoringReport: React.FC<ProcessMonitoringReportProps> = (
             <span>Total Release SLA limit (10 mins)</span>
           </div>
           <div className="font-mono text-slate-500 font-semibold uppercase">
-            FAB Vessel Process Auditor v1.2
+            FAB Process Auditor v1.2
           </div>
         </div>
       </div>

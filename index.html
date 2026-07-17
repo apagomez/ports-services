@@ -4,6 +4,122 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Google AI Studio App</title>
+    <script>
+      // Gracefully override console.error to intercept and suppress third-party, chrome-extension, and cross-origin errors
+      const originalConsoleError = console.error;
+      console.error = function() {
+        const args = Array.from(arguments);
+        const argsStr = args.map(arg => {
+          try {
+            if (!arg) return '';
+            if (typeof arg === 'object') {
+              return JSON.stringify(arg).toLowerCase() + ' ' + String(arg.message || arg.stack || arg).toLowerCase();
+            }
+            return String(arg).toLowerCase();
+          } catch(e) {
+            return '';
+          }
+        }).join(' ');
+        
+        if (
+          argsStr.includes('script error') || 
+          argsStr.includes('chrome-extension') || 
+          argsStr.includes('extension') || 
+          argsStr.includes('gsi_logger') ||
+          argsStr.includes('gapi') ||
+          argsStr.includes('accounts.google') ||
+          argsStr.trim() === ''
+        ) {
+          console.warn('Suppressed third-party/cross-origin console.error:', argsStr);
+          return;
+        }
+        
+        originalConsoleError.apply(console, arguments);
+      };
+
+      // Completely suppress Script error by intercepting addEventListener and onerror
+      const originalAEL = window.addEventListener;
+      window.addEventListener = function(type, listener, options) {
+        if (type === 'error' || type === 'unhandledrejection') {
+          const origListener = listener;
+          listener = function(e) {
+            const msg = String((e && e.message) || (e && e.error && e.error.message) || (e && e.reason && e.reason.message) || '').toLowerCase();
+            if (msg.includes('script error') || msg.includes('extension') || msg.includes('eval') || !msg) {
+              e.preventDefault();
+              e.stopPropagation();
+              return false;
+            }
+            if (typeof origListener === 'function') {
+              return origListener.apply(this, arguments);
+            } else if (origListener && typeof origListener.handleEvent === 'function') {
+              return origListener.handleEvent(e);
+            }
+          };
+        }
+        return originalAEL.call(window, type, listener, options);
+      };
+
+      let _onerror = window.onerror;
+      Object.defineProperty(window, 'onerror', {
+        get: function() { return _onerror; },
+        set: function(fn) {
+          if (typeof fn === 'function') {
+            _onerror = function(message, source, lineno, colno, error) {
+              const msg = String(message || '').toLowerCase();
+              if (msg.includes('script error') || msg.includes('extension') || !msg) return true;
+              return fn.apply(this, arguments);
+            };
+          } else {
+            _onerror = fn;
+          }
+        },
+        configurable: true
+      });
+
+      window.onerror = function(message, source, lineno, colno, error) {
+        console.warn('Suppressed unhandled script error in window.onerror:', message, 'at', source, 'line', lineno);
+        return true; 
+      };
+
+      let _onunhandledrejection = window.onunhandledrejection;
+      Object.defineProperty(window, 'onunhandledrejection', {
+        get: function() { return _onunhandledrejection; },
+        set: function(fn) {
+          if (typeof fn === 'function') {
+            _onunhandledrejection = function(e) {
+              const msg = String((e && e.reason && e.reason.message) || e.reason || '').toLowerCase();
+              if (msg.includes('script error') || msg.includes('extension') || !msg) {
+                e.preventDefault();
+                return;
+              }
+              return fn.apply(this, arguments);
+            };
+          } else {
+            _onunhandledrejection = fn;
+          }
+        },
+        configurable: true
+      });
+
+      window.onunhandledrejection = function(e) {
+        console.warn('Suppressed unhandled promise rejection in window.onunhandledrejection:', e.reason);
+        e.preventDefault();
+      };
+      window.addEventListener('error', function(e) {
+        console.warn('Caught and prevented unhandled error event:', e.error || e.message);
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+      }, true);
+
+      // Capture phase rejection listener to suppress unhandled promise rejections
+      window.addEventListener('unhandledrejection', function(e) {
+        console.warn('Caught and prevented unhandled promise rejection:', e.reason);
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+      }, true);
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -13,20 +13,33 @@ import {
   ArrowRight,
   ShieldCheck,
   UserCheck,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Settings
 } from 'lucide-react';
 import { VesselApplication } from '../types';
 import { cn } from '../lib/utils';
 import { VesselEntryForm } from './VesselEntryForm';
 import { PASForm } from './PASForm';
-import { getAccessToken } from '../services/googleSheetsService';
+import { GatePassForm } from './GatePassForm';
+import { 
+  getAccessToken, 
+  googleSignIn, 
+  logout as googleLogout, 
+  initAuth as googleInitAuth,
+  getVesselMasterSpreadsheetId,
+  setVesselMasterSpreadsheetId,
+  getProcessMonitoringSpreadsheetId,
+  setProcessMonitoringSpreadsheetId,
+  getPaymentsSpreadsheetId,
+  setPaymentsSpreadsheetId
+} from '../services/googleSheetsService';
 import { ProcessMonitoringReport } from './ProcessMonitoringReport';
-import { formatSystemDate } from '../utils/dateFormatter';
+import { formatSystemDate, formatSystemDateTime } from '../utils/dateFormatter';
 
 interface ApplicationDashboardProps {
   applications: VesselApplication[];
   onUpdateStatus: (id: string, newStatus: VesselApplication['status'], extraFields?: Partial<VesselApplication>) => void;
-  onUpdateApp?: (id: string, updatedApp: Partial<VesselApplication>) => void;
+  onUpdateApp?: (id: string, updatedApp: Partial<VesselApplication>) => Promise<void> | void;
   onDeleteApp?: (id: string) => Promise<void> | void;
   authRole?: 'admin' | 'user' | 'checker' | 'approver';
   options?: {
@@ -49,12 +62,92 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
   const [search, setSearch] = useState('');
   const [selectedApp, setSelectedApp] = useState<VesselApplication | null>(null);
 
+  const [googleUser, setGoogleUser] = useState<any>(null);
+  const [googleToken, setGoogleToken] = useState<string | null>(null);
+  const [isGoogleConnecting, setIsGoogleConnecting] = useState(false);
+
+  const [showSheetSettings, setShowSheetSettings] = useState(false);
+  const [vesselMasterId, setVesselMasterId] = useState('');
+  const [processMonitoringId, setProcessMonitoringId] = useState('');
+  const [paymentsId, setPaymentsId] = useState('');
+
+  useEffect(() => {
+    setVesselMasterId(getVesselMasterSpreadsheetId());
+    setProcessMonitoringId(getProcessMonitoringSpreadsheetId());
+    setPaymentsId(getPaymentsSpreadsheetId());
+  }, []);
+
+  const handleSaveSheetSettings = () => {
+    setVesselMasterSpreadsheetId(vesselMasterId);
+    setProcessMonitoringSpreadsheetId(processMonitoringId);
+    setPaymentsSpreadsheetId(paymentsId);
+    setToast({ type: 'success', message: 'Spreadsheet connection parameters updated!' });
+    setShowSheetSettings(false);
+    setTimeout(() => {
+      window.location.reload();
+    }, 1200);
+  };
+
+  useEffect(() => {
+    let unsubscribe: any;
+    try {
+      unsubscribe = googleInitAuth(
+        (user, token) => {
+          setGoogleUser(user);
+          setGoogleToken(token);
+        },
+        () => {
+          setGoogleUser(null);
+          setGoogleToken(null);
+        }
+      );
+    } catch (e) {
+      console.warn("initAuth failed:", e);
+    }
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    };
+  }, []);
+
+  const handleConnectGoogle = async () => {
+    try {
+      setIsGoogleConnecting(true);
+      const res = await googleSignIn();
+      if (res) {
+        setGoogleUser(res.user);
+        setGoogleToken(res.accessToken);
+        setToast({ type: 'success', message: `Connected Google Sheets: ${res.user.email}` });
+      }
+    } catch (error: any) {
+      if (error?.code === 'auth/popup-closed-by-user' || error?.message?.includes('popup-closed-by-user')) {
+        setToast({ type: 'error', message: 'Google Sheets connection cancelled (popup closed).' });
+        return;
+      }
+      setToast({ type: 'error', message: `Google Connection Failed: ${error.message}` });
+    } finally {
+      setIsGoogleConnecting(false);
+    }
+  };
+
+  const handleDisconnectGoogle = async () => {
+    try {
+      await googleLogout();
+      setGoogleUser(null);
+      setGoogleToken(null);
+      setToast({ type: 'success', message: 'Google Sheets account unlinked.' });
+    } catch (error: any) {
+      console.error('Google Sheets sign out failed:', error);
+    }
+  };
+
   const handleUpdateStatus = async (id: string, newStatus: VesselApplication['status'], extraFields?: Partial<VesselApplication>) => {
     await onUpdateStatus(id, newStatus, extraFields);
     setSelectedApp(prev => prev && prev.id === id ? { ...prev, status: newStatus, ...extraFields } : prev);
   };
   const [viewMode, setViewMode] = useState<'apps' | 'report'>('apps');
-  const [selectedType, setSelectedType] = useState<'VEP' | 'PAS'>('VEP');
+  const [selectedType, setSelectedType] = useState<'VEP' | 'PAS' | 'PGP'>('VEP');
   
   // Custom dialog confirmations and friendly notifications (to bypass iframe window.confirm/alert blocks)
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -68,6 +161,7 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
   } | null>(null);
   
   const [dialogSignerName, setDialogSignerName] = useState('');
+  const [dialogPasControlNo, setDialogPasControlNo] = useState('');
   const [dialogSignatureType, setDialogSignatureType] = useState<'draw' | 'upload'>('draw');
   const [dialogSignatureData, setDialogSignatureData] = useState('');
   const [isDialogDrawing, setIsDialogDrawing] = useState(false);
@@ -239,9 +333,10 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
   };
 
   // Segment applications by type
-  const vepApps = applications.filter(a => a.applicationType !== 'PAS');
+  const vepApps = applications.filter(a => a.applicationType !== 'PAS' && a.applicationType !== 'PGP');
   const pasApps = applications.filter(a => a.applicationType === 'PAS');
-  const currentTypeApps = selectedType === 'PAS' ? pasApps : vepApps;
+  const pgpApps = applications.filter(a => a.applicationType === 'PGP');
+  const currentTypeApps = selectedType === 'PAS' ? pasApps : selectedType === 'PGP' ? pgpApps : vepApps;
 
   // Build list of stages for filtering
   const stages = [
@@ -285,6 +380,8 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
     const matchesSearch = 
       (app.vesselName || '').toLowerCase().includes(searchLower) || 
       (app.agent && app.agent.toLowerCase().includes(searchLower)) ||
+      (app.company && app.company.toLowerCase().includes(searchLower)) ||
+      (app.nameOfRepresentative && app.nameOfRepresentative.toLowerCase().includes(searchLower)) ||
       (app.id || '').toLowerCase().includes(searchLower);
       
     return matchesSearch;
@@ -300,28 +397,73 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
         authRole === 'approver' ? "bg-purple-50/50 border-purple-200 text-purple-900" :
         "bg-slate-50 border-slate-200 text-slate-800"
       )}>
-        <div className="flex items-center gap-3">
-          <div className={cn(
-            "p-2 rounded-lg",
-            authRole === 'checker' ? "bg-amber-100 text-amber-700" :
-            authRole === 'approver' ? "bg-purple-100 text-purple-700" :
-            "bg-blue-100 text-blue-700"
-          )}>
-            {authRole === 'checker' ? <UserCheck className="w-5 h-5" /> :
-             authRole === 'approver' ? <ShieldCheck className="w-5 h-5" /> :
-             <FileText className="w-5 h-5" />}
+        <div className="flex flex-col md:flex-row md:items-center justify-between w-full gap-4">
+          <div className="flex items-center gap-3">
+            <div className={cn(
+              "p-2 rounded-lg flex-shrink-0",
+              authRole === 'checker' ? "bg-amber-100 text-amber-700" :
+              authRole === 'approver' ? "bg-purple-100 text-purple-700" :
+              "bg-blue-100 text-blue-700"
+            )}>
+              {authRole === 'checker' ? <UserCheck className="w-5 h-5" /> :
+               authRole === 'approver' ? <ShieldCheck className="w-5 h-5" /> :
+               <FileText className="w-5 h-5" />}
+            </div>
+            <div>
+              <h3 className="font-bold text-sm uppercase tracking-wider">
+                {authRole === 'checker' && "Port Checker Review Desk"}
+                {authRole === 'approver' && "Port Approver Authorization Panel"}
+                {authRole === 'admin' && "Full Administrator Command Station"}
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {authRole === 'checker' && "Ensure physical logs, payload specs, and arrival chronologies match. Forward approved files to the Port Approver."}
+                {authRole === 'approver' && "Review checked applications and finalize authorizations. Approved permits will auto-append to the Google Sheet ledger."}
+                {authRole === 'admin' && "Oversee, bypass, modify, or delete any applications across either checker or approval pipeline stages."}
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="font-bold text-sm uppercase tracking-wider">
-              {authRole === 'checker' && "Port Checker Review Desk"}
-              {authRole === 'approver' && "Port Approver Authorization Panel"}
-              {authRole === 'admin' && "Full Administrator Command Station"}
-            </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {authRole === 'checker' && "Ensure physical logs, payload specs, and arrival chronologies match. Forward approved files to the Port Approver."}
-              {authRole === 'approver' && "Review checked applications and finalize authorizations. Approved permits will auto-append to the Google Sheet ledger."}
-              {authRole === 'admin' && "Oversee, bypass, modify, or delete any applications across either checker or approval pipeline stages."}
-            </p>
+
+          {/* Google Sheets Access Module */}
+          <div className="flex items-center gap-2.5 bg-white border border-slate-200/80 p-2 rounded-xl text-xs font-sans shadow-2xs self-start md:self-auto max-w-full md:max-w-xs">
+            <FileSpreadsheet className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+            <div className="flex flex-col min-w-0 flex-1 leading-tight">
+              <span className="text-[8.5px] font-bold text-slate-400 uppercase tracking-widest block">Google Sheets Sync</span>
+              {googleUser ? (
+                <span className="text-[9.5px] font-extrabold text-emerald-700 truncate block uppercase max-w-[130px]" title={googleUser.email}>
+                  Active: {googleUser.email.split('@')[0]}
+                </span>
+              ) : (
+                <span className="text-[9.5px] font-extrabold text-amber-600 block uppercase">
+                  Inactive / Offline
+                </span>
+              )}
+            </div>
+            {googleUser ? (
+              <button
+                type="button"
+                onClick={handleDisconnectGoogle}
+                className="hover:bg-red-50 text-red-600 px-2 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-colors cursor-pointer flex-shrink-0 border border-red-200/50"
+              >
+                Disconnect
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleConnectGoogle}
+                disabled={isGoogleConnecting}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-3 py-1.5 rounded-lg text-[9px] uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer shadow-2xs disabled:opacity-50 flex-shrink-0"
+              >
+                {isGoogleConnecting ? "Linking..." : "Link Google"}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowSheetSettings(true)}
+              className="text-slate-400 hover:text-slate-600 p-1.5 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer flex-shrink-0 border border-slate-200/50"
+              title="Configure Spreadsheet IDs"
+            >
+              <Settings className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       </div>
@@ -358,7 +500,7 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
           </div>
 
           {/* Application Type Tabs Grid to separate each type completely */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 print:hidden">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 print:hidden">
             <button
               onClick={() => {
                 setSelectedType('VEP');
@@ -438,6 +580,46 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                 <div className="absolute bottom-0 left-0 right-0 h-1 bg-fab-red" />
               )}
             </button>
+
+            <button
+              onClick={() => {
+                setSelectedType('PGP');
+              }}
+              className={cn(
+                "p-4 rounded-xl border text-left transition-all relative overflow-hidden cursor-pointer",
+                selectedType === 'PGP'
+                  ? "bg-gradient-to-br from-slate-900 to-slate-800 text-white border-slate-900 shadow-md"
+                  : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:shadow-sm"
+              )}
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className={cn("font-bold text-sm uppercase tracking-wider", selectedType === 'PGP' ? "text-white" : "text-slate-800")}>
+                    Port Gate Passes (PGP)
+                  </h3>
+                  <p className={cn("text-xs mt-1", selectedType === 'PGP' ? "text-slate-300" : "text-slate-500")}>
+                    Review and authorize port cargo movement & gate clearance passes.
+                  </p>
+                </div>
+                <div className={cn(
+                  "p-2 rounded-lg",
+                  selectedType === 'PGP' ? "bg-white/10 text-white" : "bg-slate-100 text-slate-700"
+                )}>
+                  <FileText className="w-5 h-5 text-orange-500" />
+                </div>
+              </div>
+              <div className="mt-4 flex items-baseline gap-2">
+                <span className={cn("text-2xl font-black", selectedType === 'PGP' ? "text-white" : "text-slate-900")}>
+                  {pgpApps.length}
+                </span>
+                <span className={cn("text-[10px] font-bold uppercase", selectedType === 'PGP' ? "text-slate-400" : "text-slate-500")}>
+                  Total PGP Applications
+                </span>
+              </div>
+              {selectedType === 'PGP' && (
+                <div className="absolute bottom-0 left-0 right-0 h-1 bg-fab-red" />
+              )}
+            </button>
           </div>
 
           {/* Pipeline Stage Tracker Headers */}
@@ -493,7 +675,12 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                         {app.applicationType === 'PAS' && (
                           <span className="text-[8px] font-black bg-purple-100 text-purple-700 border border-purple-100 px-1.5 py-0.5 rounded tracking-wider uppercase block w-max mb-1.5">Port Ancillary Service</span>
                         )}
-                        <h3 className="font-bold text-slate-900 border-b-2 border-slate-200 inline-block pb-0.5 text-lg uppercase tracking-tight">{app.vesselName || 'Unnamed Vessel'}</h3>
+                        {app.applicationType === 'PGP' && (
+                          <span className="text-[8px] font-black bg-orange-100 text-orange-700 border border-orange-100 px-1.5 py-0.5 rounded tracking-wider uppercase block w-max mb-1.5">Port Gate Pass</span>
+                        )}
+                        <h3 className="font-bold text-slate-900 border-b-2 border-slate-200 inline-block pb-0.5 text-lg uppercase tracking-tight">
+                          {app.applicationType === 'PGP' ? (app.company || 'Port Gate Pass') : (app.vesselName || 'Unnamed Vessel')}
+                        </h3>
                         <p className="text-xs text-slate-500 mt-1 uppercase font-mono">{formatSystemDate(app.createdAt)}</p>
                       </div>
                       <span className={cn(
@@ -519,6 +706,21 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                           <div className="flex justify-between border-b border-slate-50 pb-1.5">
                             <span className="text-slate-500">Voyage / Call:</span>
                             <span className="font-medium text-slate-900 text-right uppercase text-[11px]">{app.voyageType || 'Domestic'} - {app.voyageNo || '-'}</span>
+                          </div>
+                        </>
+                      ) : app.applicationType === 'PGP' ? (
+                        <>
+                          <div className="flex justify-between border-b border-slate-50 pb-1.5">
+                            <span className="text-slate-500">Representative:</span>
+                            <span className="font-medium text-slate-900 text-right uppercase text-[11px] truncate max-w-[150px]">{app.nameOfRepresentative || '-'}</span>
+                          </div>
+                          <div className="flex justify-between border-b border-slate-50 pb-1.5">
+                            <span className="text-slate-500">Cargo Type:</span>
+                            <span className="font-medium text-slate-900 text-right uppercase text-[11px]">{app.typeOfCargo || '-'}</span>
+                          </div>
+                          <div className="flex justify-between border-b border-slate-50 pb-1.5">
+                            <span className="text-slate-500">Operation Dates:</span>
+                            <span className="font-medium text-slate-900 text-right uppercase text-[11px]">{app.dateOfOperationStart ? formatSystemDate(app.dateOfOperationStart) : '-'} - {app.dateOfOperationEnd ? formatSystemDate(app.dateOfOperationEnd) : '-'}</span>
                           </div>
                         </>
                       ) : (
@@ -582,8 +784,8 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                     <span className="text-slate-500 font-mono text-[9px] bg-slate-100 px-1.5 py-0.5 rounded font-black uppercase border border-slate-200/50">
                       {selectedApp.applicationType || 'VEP'}
                     </span>
-                    <h2 className="font-extrabold text-slate-950 uppercase tracking-tight text-sm truncate max-w-[200px]" title={selectedApp.vesselName || 'Unnamed Vessel'}>
-                      {selectedApp.vesselName || 'Unnamed Vessel'}
+                    <h2 className="font-extrabold text-slate-950 uppercase tracking-tight text-sm truncate max-w-[200px]" title={selectedApp.applicationType === 'PGP' ? (selectedApp.company || 'Gate Pass') : (selectedApp.vesselName || 'Unnamed Vessel')}>
+                      {selectedApp.applicationType === 'PGP' ? (selectedApp.company || 'Gate Pass') : (selectedApp.vesselName || 'Unnamed Vessel')}
                     </h2>
                   </div>
                   <div className="flex items-center gap-2 mt-0.5">
@@ -597,6 +799,26 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                     <span className="text-xs font-mono text-slate-650 font-bold bg-slate-50 px-2 py-0.5 rounded border border-slate-200/40">
                       Ref: {selectedApp.id}
                     </span>
+                  </div>
+
+                  {/* Workflow / Process Audit Trail Timestamps */}
+                  <div className="mt-2 text-[9px] font-bold space-y-0.5 w-full border-t border-slate-150 pt-2 text-slate-500 font-mono leading-none">
+                    <div className="flex justify-between items-center gap-1">
+                      <span className="uppercase text-slate-400">1. Submitted:</span>
+                      <span className="text-slate-700 font-extrabold">{formatSystemDateTime(selectedApp.submittedAt || selectedApp.createdAt)}</span>
+                    </div>
+                    <div className="flex justify-between items-center gap-1">
+                      <span className="uppercase text-slate-400">2. Checked:</span>
+                      <span className="text-slate-750 font-extrabold">
+                        {selectedApp.checkedAt ? formatSystemDateTime(selectedApp.checkedAt) : <span className="text-slate-350 italic font-semibold">Pending Check...</span>}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center gap-1">
+                      <span className="uppercase text-slate-400">3. Approved:</span>
+                      <span className="text-slate-800 font-extrabold">
+                        {selectedApp.approvedAt ? formatSystemDateTime(selectedApp.approvedAt) : <span className="text-slate-350 italic font-semibold">Pending Approval...</span>}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -671,6 +893,7 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                               setDialogSignerName('');
                               setDialogSignatureType('draw');
                               setDialogSignatureData('');
+                              setDialogPasControlNo(selectedApp.id);
                               setConfirmDialog({
                                 title: "Verify Vessel Station",
                                 message: "Confirming verification certifies that all arrival indices, berth targets, and declarations are validated. Please fill your name and sign-off below to route this application to the AFAB Authorized Official's review station.",
@@ -680,11 +903,20 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                                 roleLabel: "AFAB Authorized Official Name",
                                 onConfirm: async (signerName, signatureData) => {
                                   const today = new Date().toISOString();
+                                  const updatedControlNo = dialogPasControlNo.trim() 
+                                    ? dialogPasControlNo.trim() 
+                                    : selectedApp.id;
+
                                   await handleUpdateStatus(selectedApp.id, 'Pending Approval', {
+                                    id: updatedControlNo,
                                     checkedByName: signerName,
                                     checkedAt: today,
                                     checkedSignatureData: signatureData
                                   });
+
+                                  // Automatically close the pop up/drawer on verification approval
+                                  setSelectedApp(null);
+
                                   setToast({ type: 'success', message: 'Application successfully verified and routed to the Port Approver.' });
                                 }
                               });
@@ -702,6 +934,7 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                                 actionStyle: "bg-red-600 hover:bg-red-700",
                                 onConfirm: async () => {
                                   await handleUpdateStatus(selectedApp.id, 'Rejected');
+                                  setSelectedApp(null);
                                   setToast({ type: 'error', message: 'The vessel application was flagged and rejected.' });
                                 }
                               });
@@ -726,15 +959,13 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                     <>
                       {(authRole === 'approver' || authRole === 'admin') ? (
                         <>
-                          <button 
+                           <button 
                             onClick={async () => {
                               setDialogSignerName('');
                               setDialogSignatureType('draw');
                               setDialogSignatureData('');
-                              const token = await getAccessToken();
-                              const msgSuffix = token 
-                                ? "Please fill your name and sign-off below to archive parameters offline and log records in the official Google Sheet ledger."
-                                : "Warning: No active Google Sheets connection detected. You can still approve this permit inside the portal; however, it will not be synced to Google Sheets. Fill your name and sign-off below to issue approval.";
+                              setDialogPasControlNo(selectedApp.id);
+                              const msgSuffix = "Please fill your name and sign-off below to archive parameters and automatically sync records to the official Google Sheets ledger.";
                               setConfirmDialog({
                                 title: "Authorize Entry Permit Station",
                                 message: `Issue formal approval for this vessel entry permit? ${msgSuffix}`,
@@ -745,11 +976,19 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                                 onConfirm: async (signerName, signatureData) => {
                                   try {
                                     const today = new Date().toISOString();
+                                    const updatedControlNo = dialogPasControlNo.trim() 
+                                      ? dialogPasControlNo.trim() 
+                                      : selectedApp.id;
+
                                     await handleUpdateStatus(selectedApp.id, 'Approved', {
+                                      id: updatedControlNo,
                                       approvedByName: signerName,
                                       approvedAt: today,
                                       approvedSignatureData: signatureData
                                     });
+
+                                    setSelectedApp(null);
+
                                     setToast({ type: 'success', message: 'Vessel application finalized! Approved and logged.' });
                                   } catch (e: any) {
                                     console.error("Approval state update failed:", e);
@@ -771,6 +1010,7 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                                 actionStyle: "bg-red-600 hover:bg-red-700",
                                 onConfirm: async () => {
                                   await handleUpdateStatus(selectedApp.id, 'Rejected');
+                                  setSelectedApp(null);
                                   setToast({ type: 'error', message: 'Authorization denied and application stored as rejected.' });
                                 }
                               });
@@ -907,9 +1147,28 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                     options={options}
                     initialData={selectedApp}
                     isEditMode={true}
+                    authRole={authRole}
                     onBack={() => setSelectedApp(null)}
-                    onSubmitApp={(updatedData) => {
-                      onUpdateApp?.(selectedApp.id, updatedData);
+                    onSubmitApp={async (updatedData) => {
+                      await onUpdateApp?.(selectedApp.id, updatedData);
+                      if (updatedData.id && updatedData.id !== selectedApp.id) {
+                        setSelectedApp(prev => prev ? { ...prev, ...updatedData } : null);
+                      }
+                    }}
+                  />
+                ) : selectedApp.applicationType === 'PGP' ? (
+                  <GatePassForm 
+                    key={`pgp-${selectedApp.id}-${selectedApp.status}-${selectedApp.checkedAt || ''}-${selectedApp.approvedAt || ''}`}
+                    options={options}
+                    initialData={selectedApp}
+                    isEditMode={true}
+                    authRole={authRole}
+                    onBack={() => setSelectedApp(null)}
+                    onSubmitApp={async (updatedData) => {
+                      await onUpdateApp?.(selectedApp.id, updatedData);
+                      if (updatedData.id && updatedData.id !== selectedApp.id) {
+                        setSelectedApp(prev => prev ? { ...prev, ...updatedData } : null);
+                      }
                     }}
                   />
                 ) : (
@@ -918,10 +1177,13 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                     options={options}
                     initialData={selectedApp}
                     isEditMode={true}
-                    isAdmin={true}
+                    authRole={authRole}
                     onBack={() => setSelectedApp(null)}
-                    onSubmitApp={(updatedData) => {
-                      onUpdateApp?.(selectedApp.id, updatedData);
+                    onSubmitApp={async (updatedData) => {
+                      await onUpdateApp?.(selectedApp.id, updatedData);
+                      if (updatedData.id && updatedData.id !== selectedApp.id) {
+                        setSelectedApp(prev => prev ? { ...prev, ...updatedData } : null);
+                      }
                     }}
                   />
                 )}
@@ -972,6 +1234,32 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                       required
                     />
                   </div>
+
+                  {/* Control Number Input (For checkers, approvers, and admins) */}
+                  {(selectedApp.applicationType === 'PAS' || selectedApp.applicationType === 'VEP' || selectedApp.applicationType === 'PGP') && (
+                    <div className="bg-amber-50/70 p-3.5 rounded-lg border border-amber-200/50 space-y-1">
+                      <label className="block text-[10px] font-black uppercase tracking-wider text-amber-800">
+                        {selectedApp.applicationType === 'VEP' ? 'VEP Control Number' :
+                         selectedApp.applicationType === 'PGP' ? 'PGP Control Number' :
+                         'PAS Control Number'}
+                      </label>
+                      <input
+                        type="text"
+                        value={dialogPasControlNo}
+                        onChange={(e) => setDialogPasControlNo(e.target.value.toUpperCase())}
+                        placeholder={
+                          selectedApp.applicationType === 'VEP' ? 'PSD-26-XXX' :
+                          selectedApp.applicationType === 'PGP' ? 'PGP-26-XXX' :
+                          'PAS-26-XXX'
+                        }
+                        className="w-full bg-white border border-slate-300 rounded px-3 py-2 text-xs font-mono font-bold uppercase text-slate-900 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+                        required
+                      />
+                      <p className="text-[9px] text-amber-700 font-medium leading-relaxed">
+                        Notice: You can change/customize this control number before finalizing verification/approval.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Signature Type Tabs */}
                   <div>
@@ -1118,6 +1406,93 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
               </div>
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* Spreadsheet Configuration Settings Modal */}
+      <AnimatePresence>
+        {showSheetSettings && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full p-6 relative"
+            >
+              <button
+                type="button"
+                onClick={() => setShowSheetSettings(false)}
+                className="absolute right-4 top-4 text-slate-400 hover:text-slate-600 p-1.5 hover:bg-slate-100 rounded-full transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+              <div className="flex items-center gap-3 border-b border-slate-100 pb-4 mb-5">
+                <div className="bg-emerald-50 p-2 rounded-xl text-emerald-600">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div className="text-left">
+                  <h3 className="font-extrabold text-slate-900 text-sm">Spreadsheet Connection Settings</h3>
+                  <p className="text-[10px] text-slate-500 mt-0.5">Configure target spreadsheet IDs for automatic ledger synchronization.</p>
+                </div>
+              </div>
+
+              <div className="space-y-4 font-sans text-xs text-left">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Vessel Master Spreadsheet ID</label>
+                  <input
+                    type="text"
+                    value={vesselMasterId}
+                    onChange={(e) => setVesselMasterId(e.target.value)}
+                    placeholder="Enter Vessel Master Sheet ID..."
+                    className="w-full border border-slate-200 rounded-xl p-2.5 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 transition-all font-mono text-[10.5px] placeholder:text-slate-400 text-slate-800"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Default ID is used for Vessel Entry Permits (VEPs).</p>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Process Monitoring Spreadsheet ID (PAS / PGP)</label>
+                  <input
+                    type="text"
+                    value={processMonitoringId}
+                    onChange={(e) => setProcessMonitoringId(e.target.value)}
+                    placeholder="Enter Process Monitoring Sheet ID..."
+                    className="w-full border border-slate-200 rounded-xl p-2.5 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 transition-all font-mono text-[10.5px] placeholder:text-slate-400 text-slate-800"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Used for Port Ancillary Services (PAS) & Port Gate Passes (PGP).</p>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Payments & Revenue Spreadsheet ID</label>
+                  <input
+                    type="text"
+                    value={paymentsId}
+                    onChange={(e) => setPaymentsId(e.target.value)}
+                    placeholder="Enter Payments & Revenue Sheet ID..."
+                    className="w-full border border-slate-200 rounded-xl p-2.5 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 transition-all font-mono text-[10.5px] placeholder:text-slate-400 text-slate-800"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Used for Payment Dashboard metrics and Voyage Payment CSV exports.</p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-4 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setShowSheetSettings(false)}
+                  className="px-4 py-2 hover:bg-slate-100 text-slate-700 rounded-xl font-bold uppercase tracking-wider text-[10px] transition-colors cursor-pointer border border-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveSheetSettings}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-xl font-extrabold uppercase tracking-wider text-[10px] transition-colors shadow-sm cursor-pointer"
+                >
+                  Save & Reload
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 

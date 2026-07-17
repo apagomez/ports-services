@@ -75,6 +75,7 @@ export interface AncillaryRecord {
   terminal: string;
   serviceType: string;
   vesselName: string;
+  voyageNo?: string;
   amount: number;
   vat: number;
   total: number;
@@ -85,6 +86,7 @@ export interface AncillaryRecord {
 export interface VesselApplication {
   id: string;
   createdAt: string;
+  submittedAt?: string;
   vesselName: string;
   agent?: string;
   vesselType?: string;
@@ -104,7 +106,22 @@ export interface VesselApplication {
   terminal?: string;
   cargoDescription?: string;
   status: 'Pending' | 'Pending Check' | 'Pending Approval' | 'Approved' | 'Rejected';
-  applicationType?: 'VEP' | 'PAS';
+  applicationType?: 'VEP' | 'PAS' | 'PGP';
+  company?: string;
+  companyAddress?: string;
+  nameOfRepresentative?: string;
+  contactNumber?: string;
+  dateOfOperationFrom?: string;
+  dateOfOperationTo?: string;
+  operationLoading?: boolean;
+  operationUnloading?: boolean;
+  cargoDeclaredBL?: boolean;
+  articlesNotSubjectImport?: boolean;
+  typeOfTransport?: 'Land' | 'Sea' | 'Air';
+  typeOfCargoByOrigin?: 'Import' | 'Export' | 'Coastwise';
+  classificationOfCargo?: 'Bulk Cargo' | 'General Cargo' | 'Containerized Cargo' | 'Others';
+  classificationSpecify?: string;
+  cargoTableData?: CargoRow[];
   serviceProviderName?: string;
   serviceBusinessAddress?: string;
   serviceContactNo?: string;
@@ -124,6 +141,27 @@ export interface VesselApplication {
   approvedSignatureData?: string;
 }
 
+export interface VoyagePaymentRecord {
+  controlNo: string;
+  month: string;
+  vesselName: string;
+  shippingAgency: string;
+  portDues: number;
+  dockage: number;
+  anchorage: number;
+  pilotage: number;
+  usageFee: number;
+  serviceFee: number;
+  vatVessel: number;
+  consignee: string;
+  importWharfage: number;
+  domesticWharfage: number;
+  vatCargo: number;
+  actualPayment: number;
+  vesselTotal: number;
+  cargoTotal: number;
+}
+
 export interface PaymentDashboardData {
   monthlyRevenue: MonthlyRevenue[];
   feeBreakdown: FeeBreakdown[];
@@ -131,8 +169,19 @@ export interface PaymentDashboardData {
   tugboatMonthly: { month: string; value: number }[];
   ancillaryMonthly: { month: string; value: number }[];
   ancillaryRecords: AncillaryRecord[];
+  voyagePayments?: VoyagePaymentRecord[];
   annualTotal: number;
   vmfTotal: number;
   tugboatTotal: number;
   ancillaryTotal: number;
+  pgpControlNumbers?: string[];
+}
+
+export interface CargoRow {
+  blNo: string;
+  description: string;
+  quantity: number;
+  unit: string;
+  weightVolume: number;
+  total: number;
 }

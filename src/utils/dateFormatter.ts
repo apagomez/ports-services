@@ -96,3 +96,19 @@ export function formatSystemTime(dateInput: any): string {
   if (isNaN(d.getTime())) return '-';
   return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
 }
+
+/**
+ * Returns formatted date and time, e.g. "26-Jun-26 01:09 PM"
+ */
+export function formatSystemDateTime(dateInput: any): string {
+  if (!dateInput) return '-';
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) {
+    // If it's already some pre-formatted string, return it as is or try standard split
+    return String(dateInput);
+  }
+  const formattedDate = formatSystemDate(d);
+  const formattedTime = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  return `${formattedDate} at ${formattedTime}`;
+}
+

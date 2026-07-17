@@ -3,6 +3,7 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { VesselApplication } from '../types';
+import { safeStorage } from '../utils/safeStorage';
 
 if (!firebaseConfig) {
   console.error("firebase-applet-config.json is missing");
@@ -13,7 +14,13 @@ const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
   useFetchStreams: false,
 } as any, firebaseConfig.firestoreDatabaseId || '(default)');
-export const auth = getAuth(app);
+let _auth: any = null;
+export const getAuthInstance = () => {
+  if (!_auth) {
+    _auth = getAuth(app);
+  }
+  return _auth;
+};
 
 // Connectivity validation mandated by Firebase Integration Skill
 async function testFirestoreConnectionOnBoot() {
@@ -61,12 +68,12 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+      userId: getAuthInstance().currentUser?.uid,
+      email: getAuthInstance().currentUser?.email,
+      emailVerified: getAuthInstance().currentUser?.emailVerified,
+      isAnonymous: getAuthInstance().currentUser?.isAnonymous,
+      tenantId: getAuthInstance().currentUser?.tenantId,
+      providerInfo: getAuthInstance().currentUser?.providerData?.map((provider: any) => ({
         providerId: provider.providerId,
         email: provider.email,
       })) || []
@@ -82,25 +89,16 @@ export const signInWithGoogle = async (): Promise<User> => {
   const provider = new GoogleAuthProvider();
   provider.addScope('https://www.googleapis.com/auth/spreadsheets');
   provider.addScope('https://www.googleapis.com/auth/drive.readonly');
-  const result = await signInWithPopup(auth, provider);
-  const credential = GoogleAuthProvider.credentialFromResult(result);
-  if (credential?.accessToken) {
-    try {
-      localStorage.setItem('google_sheets_access_token', credential.accessToken);
-      localStorage.setItem('google_sheets_access_token_saved_at', Date.now().toString());
-    } catch (e) {
-      console.warn("Could not save sheets token during google login:", e);
-    }
-  }
+  const result = await signInWithPopup(getAuthInstance(), provider);
   return result.user;
 };
 
 export const firebaseLogout = async () => {
-  await signOut(auth);
+  await signOut(getAuthInstance());
 };
 
 export const observeAuthState = (callback: (user: User | null) => void) => {
-  return onAuthStateChanged(auth, callback);
+  return onAuthStateChanged(getAuthInstance(), callback);
 };
 
 export const saveApplicationToFirestore = async (application: Partial<VesselApplication> & { id?: string }) => {

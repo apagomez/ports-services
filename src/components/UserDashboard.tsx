@@ -3,20 +3,25 @@ import { FileText, CheckSquare, LogOut, Ship, User, LayoutGrid, ArrowLeft, Edit3
 import { motion, AnimatePresence } from 'motion/react';
 import { VesselEntryForm } from './VesselEntryForm';
 import { PASForm } from './PASForm';
+import { GatePassForm } from './GatePassForm';
 
 import { VesselApplication } from '../types';
 
-import { formatSystemDate } from '../utils/dateFormatter';
+import { formatSystemDate, formatSystemDateTime } from '../utils/dateFormatter';
 
 const formatUserDate = (dateVal?: string | number | null): string => {
   return formatSystemDate(dateVal);
+};
+
+const formatUserDateTime = (dateVal?: string | number | null): string => {
+  return formatSystemDateTime(dateVal);
 };
 
 interface UserDashboardProps {
   applications?: VesselApplication[];
   userEmail?: string | null;
   onLogout: () => void;
-  onSubmitApp?: (app: Omit<VesselApplication, 'id' | 'createdAt' | 'status'>) => void;
+  onSubmitApp?: (app: Omit<VesselApplication, 'id' | 'createdAt' | 'status'> & { id?: string }, originalId?: string) => Promise<void> | void;
   onDeleteApp?: (id: string) => Promise<void> | void;
   options?: {
     voyages: string[];
@@ -80,7 +85,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
 
   const handleSubmitAndReset = async (app: any) => {
     if (onSubmitApp) {
-      await onSubmitApp(app);
+      await onSubmitApp(app, editingApplication?.id);
     }
     // Return to dashboard after a small delay so they can read/be guided
     setTimeout(() => {
@@ -193,12 +198,18 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                           <div className="flex justify-between items-start gap-2 mb-3">
                             <div>
                               <span className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded tracking-wider uppercase inline-block mb-1 ${
-                                app.applicationType === 'PAS' ? 'bg-fab-cyan/10 text-fab-cyan border border-fab-cyan/20' : 'bg-fab-blue/10 text-fab-blue border border-fab-blue/20'
+                                app.applicationType === 'PAS' ? 'bg-fab-cyan/10 text-fab-cyan border border-fab-cyan/20' : 
+                                app.applicationType === 'PGP' ? 'bg-orange-100 text-orange-700 border border-orange-200' :
+                                'bg-fab-blue/10 text-fab-blue border border-fab-blue/20'
                               }`}>
-                                {app.applicationType === 'PAS' ? 'Port Ancillary Service' : 'Vessel Entry Permit'}
+                                {app.applicationType === 'PAS' ? 'Port Ancillary Service' : 
+                                 app.applicationType === 'PGP' ? 'Port Gate Pass' :
+                                 'Vessel Entry Permit'}
                               </span>
                               <h3 className="font-bold text-slate-800 uppercase text-sm truncate max-w-[150px]">
-                                {app.applicationType === 'PAS' ? (app.vesselName || 'Ancillary Service') : (app.vesselName || 'Unnamed Vessel')}
+                                {app.applicationType === 'PAS' ? (app.vesselName || 'Ancillary Service') : 
+                                 app.applicationType === 'PGP' ? (app.company || 'Gate Pass') :
+                                 (app.vesselName || 'Unnamed Vessel')}
                               </h3>
                               <span className="text-[10px] font-mono text-slate-400 block mt-0.5">Ref: {app.id}</span>
                             </div>
@@ -226,6 +237,17 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                                   <span className="font-semibold text-slate-700 uppercase">{app.terminal || '-'}</span>
                                 </div>
                               </>
+                            ) : app.applicationType === 'PGP' ? (
+                              <>
+                                <div className="flex justify-between">
+                                  <span className="text-slate-400">Representative:</span>
+                                  <span className="font-semibold text-slate-700 uppercase truncate max-w-[150px]">{app.nameOfRepresentative || '-'}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-slate-400">Vessel:</span>
+                                  <span className="font-semibold text-slate-700 uppercase">{app.vesselName || '-'}</span>
+                                </div>
+                              </>
                             ) : (
                               <>
                                 <div className="flex justify-between">
@@ -238,9 +260,23 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                                 </div>
                               </>
                             )}
-                            <div className="flex justify-between">
-                              <span className="text-slate-400">Submitted:</span>
-                              <span className="font-semibold text-slate-700">{formatUserDate(app.createdAt)}</span>
+                            <div className="flex justify-between border-t border-slate-100/50 pt-1.5 mt-1.5 flex-col gap-1 text-[11px]">
+                              <div className="flex justify-between items-center">
+                                <span className="text-slate-400 font-bold uppercase tracking-wider text-[9px]">1. Submitted:</span>
+                                <span className="font-bold text-slate-700 font-mono text-[10px] text-right">{formatUserDateTime(app.submittedAt || app.createdAt)}</span>
+                              </div>
+                              {app.checkedAt && (
+                                <div className="flex justify-between items-center border-t border-slate-50 pt-1">
+                                  <span className="text-slate-400 font-bold uppercase tracking-wider text-[9px]">2. Checked:</span>
+                                  <span className="font-bold text-slate-750 font-mono text-[10px] text-right">{formatUserDateTime(app.checkedAt)}</span>
+                                </div>
+                              )}
+                              {app.approvedAt && (
+                                <div className="flex justify-between items-center border-t border-slate-50 pt-1">
+                                  <span className="text-slate-400 font-bold uppercase tracking-wider text-[9px]">3. Approved:</span>
+                                  <span className="font-bold text-slate-800 font-mono text-[10px] text-right">{formatUserDateTime(app.approvedAt)}</span>
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -311,6 +347,8 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                                 setEditingApplication(app);
                                 if (app.applicationType === 'PAS') {
                                   setActiveService('ancillary');
+                                } else if (app.applicationType === 'PGP') {
+                                  setActiveService('pgp');
                                 } else {
                                   setActiveService('vep');
                                 }
@@ -351,6 +389,21 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
               exit={{ opacity: 0, y: -10 }}
             >
               <PASForm 
+                onBack={handleBackToDashboard} 
+                options={options} 
+                onSubmitApp={handleSubmitAndReset} 
+                initialData={editingApplication || undefined}
+                isEditMode={!!editingApplication}
+              />
+            </motion.div>
+          ) : activeService === 'pgp' ? (
+            <motion.div
+              key="pgp-form"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <GatePassForm 
                 onBack={handleBackToDashboard} 
                 options={options} 
                 onSubmitApp={handleSubmitAndReset} 

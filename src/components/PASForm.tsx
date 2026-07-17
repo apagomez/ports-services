@@ -2,78 +2,18 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { Save, CheckCircle2, ArrowLeft, Download } from 'lucide-react';
 import html2canvas from 'html2canvas';
+import Papa from 'papaparse';
 import { VesselApplication } from '../types';
-
-const oklchToRgb = (str: string): string => {
-  if (!str) return '';
-  let result = str.replace(/oklch\(\s*([\d.]+)(%?)\s+([\d.]+)(%?)\s+([\d.]+)(deg|rad)?(?:\s*\/\s*([\d.e-]+)(%?))?\s*\)/gi, (match, lVal, lPercent, cVal, cPercent, hVal, hUnit, aVal, aPercent) => {
-    let L = parseFloat(lVal);
-    if (lPercent === '%') L /= 100;
-    let C = parseFloat(cVal);
-    if (cPercent === '%') C /= 100;
-    let H = parseFloat(hVal);
-    if (hUnit === 'rad') H = H * 180 / Math.PI;
-    let alpha = 1;
-    if (aVal !== undefined) {
-      alpha = parseFloat(aVal);
-      if (aPercent === '%') alpha /= 100;
-    }
-    const H_rad = H * Math.PI / 180;
-    const a = C * Math.cos(H_rad);
-    const b = C * Math.sin(H_rad);
-    const L_lms = L + 0.3963377774 * a + 0.2158037573 * b;
-    const M_lms = L - 0.1055613458 * a - 0.0638541728 * b;
-    const S_lms = L - 0.0894841775 * a - 1.2914855480 * b;
-    const l = Math.pow(Math.max(0, L_lms), 3);
-    const m = Math.pow(Math.max(0, M_lms), 3);
-    const s = Math.pow(Math.max(0, S_lms), 3);
-    let r_val = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
-    let g_val = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
-    let b_rgb = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
-    const transform = (x: number) => x > 0.0031308 ? 1.055 * Math.pow(x, 1 / 2.4) - 0.055 : 12.92 * x;
-    let R_val = Math.max(0, Math.min(255, Math.round(transform(r_val) * 255)));
-    let G_val = Math.max(0, Math.min(255, Math.round(transform(g_val) * 255)));
-    let B_val = Math.max(0, Math.min(255, Math.round(transform(b_rgb) * 255)));
-    return alpha === 1 ? `rgb(${R_val},${G_val},${B_val})` : `rgba(${R_val},${G_val},${B_val},${alpha})`;
-  });
-
-  result = result.replace(/oklab\(\s*([\d.]+)(%?)\s+([\d.-]+)(%?)\s+([\d.-]+)(%?)(?:\s*\/\s*([\d.]+)(%?))?\s*\)/gi, (match, lVal, lPercent, aVal, aPercent, bVal, bPercent, aVal2, aPercent2) => {
-    let L = parseFloat(lVal);
-    if (lPercent === '%') L /= 100;
-    let aValNum = parseFloat(aVal);
-    if (aPercent === '%') aValNum /= 100;
-    let bValNum = parseFloat(bVal);
-    if (bPercent === '%') bValNum /= 100;
-    let alpha = 1;
-    if (aVal2 !== undefined) {
-      alpha = parseFloat(aVal2);
-      if (aPercent2 === '%') alpha /= 100;
-    }
-    const L_lms = L + 0.3963377774 * aValNum + 0.2158037573 * bValNum;
-    const M_lms = L - 0.1055613458 * aValNum - 0.0638541728 * bValNum;
-    const S_lms = L - 0.0894841775 * aValNum - 1.2914855480 * bValNum;
-    const l = Math.pow(Math.max(0, L_lms), 3);
-    const m = Math.pow(Math.max(0, M_lms), 3);
-    const s = Math.pow(Math.max(0, S_lms), 3);
-    let r_val = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
-    let g_val = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
-    let b_rgb = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
-    const transform = (x: number) => x > 0.0031308 ? 1.055 * Math.pow(x, 1 / 2.4) - 0.055 : 12.92 * x;
-    let R_val = Math.max(0, Math.min(255, Math.round(transform(r_val) * 255)));
-    let G_val = Math.max(0, Math.min(255, Math.round(transform(g_val) * 255)));
-    let B_val = Math.max(0, Math.min(255, Math.round(transform(b_rgb) * 255)));
-    return alpha === 1 ? `rgb(${R_val},${G_val},${B_val})` : `rgba(${R_val},${G_val},${B_val},${alpha})`;
-  });
-
-  return result;
-};
+import { formatSystemDateTime } from '../utils/dateFormatter';
+import { oklchToRgb } from '../utils/colorConverter';
 import fabLogo from '../assets/images/fab-logo.png';
 
 interface PASFormProps {
   onBack: () => void;
-  onSubmitApp?: (app: Omit<VesselApplication, 'id' | 'createdAt' | 'status'>) => void;
+  onSubmitApp?: (app: Omit<VesselApplication, 'id' | 'createdAt' | 'status'> & { id?: string }) => void;
   initialData?: Partial<VesselApplication>;
   isEditMode?: boolean;
+  authRole?: 'admin' | 'user' | 'checker' | 'approver';
   options?: {
     voyages: string[];
     types: string[];
@@ -88,11 +28,13 @@ export const PASForm: React.FC<PASFormProps> = ({
   onSubmitApp, 
   options, 
   initialData, 
-  isEditMode = false 
+  isEditMode = false,
+  authRole = 'user'
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [isSavingControlNo, setIsSavingControlNo] = useState(false);
 
   // Initialize form data with fallback values or initial data
   const [controlNumber, setControlNumber] = useState<string>(initialData?.id || '');
@@ -117,21 +59,44 @@ export const PASForm: React.FC<PASFormProps> = ({
   });
 
   const printAreaRef = useRef<HTMLDivElement | null>(null);
+  const previewParentRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [containerWidth, setContainerWidth] = useState<number>(794);
+
+  useEffect(() => {
+    if (!previewParentRef.current) return;
+    
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const width = entry.contentRect.width;
+        if (width > 0) {
+          setContainerWidth(width);
+        }
+      }
+    });
+
+    resizeObserver.observe(previewParentRef.current);
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
 
   // Generate/Update control number in real-time for fresh applications
   useEffect(() => {
-    if (!isEditMode) {
+    if (isEditMode) return;
+
+    let isMounted = true;
+
+    const fetchAndSetControlNumber = async () => {
       const yearPrefix = '26';
+      let maxSeq = 350; // Start with the user's specified last control number
+
+      // 1. Process current applications/options list if available
       const used = options?.usedControlNumbers || [];
-      
-      // Parse highest sequence from used control numbers
-      let maxSeq = 282; // Start with the user's specified last control number
       used.forEach(num => {
-        // Strip out any trailing characters or match the numbers nicely
         const cleanNum = String(num).trim();
-        const match = cleanNum.match(/PAS-26-(\d+)/i) || cleanNum.match(/PAS-(\d+)/i);
+        const match = cleanNum.match(/PAS-(?:26-)?(\d+)/i);
         if (match) {
           const val = parseInt(match[1], 10);
           if (val > maxSeq) {
@@ -140,14 +105,118 @@ export const PASForm: React.FC<PASFormProps> = ({
         }
       });
 
-      const nextSeq = maxSeq + 1;
-      const paddedSeq = String(nextSeq).padStart(3, '0');
-      const candidate = `PAS-${yearPrefix}-${paddedSeq}`;
-      
-      if (controlNumber !== candidate) {
-        setControlNumber(candidate);
+      // 2. Fetch the live Google Sheet to ensure we have the absolute latest records from other sessions
+      try {
+        let rows: string[][] = [];
+        let fetchedSuccessfully = false;
+
+        // Try using Google Sheets API first if we have an active access token
+        try {
+          const { getAccessToken, getProcessMonitoringSpreadsheetId } = await import('../services/googleSheetsService');
+          const token = await getAccessToken();
+          if (token) {
+            const sheetName = 'PORT ANCILLARY SERVICES'; // Default sheet name for GID 185820608
+            const res = await fetch(
+              `https://sheets.googleapis.com/v4/spreadsheets/${getProcessMonitoringSpreadsheetId()}/values/'${encodeURIComponent(sheetName)}'!C:C`,
+              {
+                headers: {
+                  'Authorization': `Bearer ${token}`
+                }
+              }
+            );
+            if (res.ok) {
+              const data = await res.json();
+              if (data.values) {
+                rows = data.values;
+                fetchedSuccessfully = true;
+                console.log("[PASForm] Successfully fetched latest control numbers via Google Sheets API. Count:", rows.length);
+              }
+            }
+          }
+        } catch (apiErr) {
+          console.warn("[PASForm] Failed to fetch via Google Sheets API, trying CSV export fallback:", apiErr);
+        }
+
+        if (!fetchedSuccessfully) {
+          const { getProcessMonitoringSpreadsheetId } = await import('../services/googleSheetsService');
+          const sheetUrl = `https://docs.google.com/spreadsheets/d/${getProcessMonitoringSpreadsheetId()}/export?format=csv&gid=185820608&t=${Date.now()}`;
+          const res = await fetch(sheetUrl, { cache: "no-store" });
+          let csvText = "";
+
+          if (res.redirected && res.url.includes("ServiceLogin")) {
+            console.warn("Google Sheets redirected to login. Using fallback CSV for PAS.");
+            const fallbackRes = await fetch(`/ancillary_mock.csv?t=${Date.now()}`);
+            csvText = await fallbackRes.text();
+          } else if (!res.ok) {
+            console.warn("Google Sheets fetch failed. Using fallback CSV for PAS.");
+            const fallbackRes = await fetch(`/ancillary_mock.csv?t=${Date.now()}`);
+            csvText = await fallbackRes.text();
+          } else {
+            csvText = await res.text();
+          }
+
+          if (csvText) {
+            await new Promise<void>((resolve) => {
+              Papa.parse(csvText, {
+                header: false,
+                complete: (result) => {
+                  rows = result.data as string[][];
+                  resolve();
+                }
+              });
+            });
+          }
+        }
+
+        if (rows && rows.length > 0 && isMounted) {
+          rows.forEach(row => {
+            if (row) {
+              row.forEach(cell => {
+                const ctrl = String(cell).trim().toUpperCase();
+                if (ctrl.startsWith("PAS-") || ctrl.startsWith("PS-")) {
+                  const match = ctrl.match(/PAS-(?:26-)?(\d+)/i) || ctrl.match(/PAS-(\d+)/i);
+                  if (match) {
+                    const seq = parseInt(match[1], 10);
+                    if (!isNaN(seq) && seq > maxSeq) {
+                      maxSeq = seq;
+                    }
+                  }
+                }
+              });
+            }
+          });
+
+          const nextSeq = maxSeq + 1;
+          const paddedSeq = String(nextSeq).padStart(3, '0');
+          const candidate = `PAS-${yearPrefix}-${paddedSeq}`;
+          if (isMounted && controlNumber !== candidate) {
+            setControlNumber(candidate);
+          }
+        } else if (isMounted) {
+          const nextSeq = maxSeq + 1;
+          const paddedSeq = String(nextSeq).padStart(3, '0');
+          const candidate = `PAS-${yearPrefix}-${paddedSeq}`;
+          if (isMounted && controlNumber !== candidate) {
+            setControlNumber(candidate);
+          }
+        }
+      } catch (err) {
+        console.warn("Error fetching live ancillary sheet for PAS control number sequence:", err);
+        // Fallback to options/local maxSeq immediately on network failure
+        const nextSeq = maxSeq + 1;
+        const paddedSeq = String(nextSeq).padStart(3, '0');
+        const candidate = `PAS-${yearPrefix}-${paddedSeq}`;
+        if (isMounted && controlNumber !== candidate) {
+          setControlNumber(candidate);
+        }
       }
-    }
+    };
+
+    fetchAndSetControlNumber();
+
+    return () => {
+      isMounted = false;
+    };
   }, [isEditMode, options?.usedControlNumbers, controlNumber]);
 
   // Keep agent field synced with serviceProviderName for compatibility with general logs
@@ -280,6 +349,12 @@ export const PASForm: React.FC<PASFormProps> = ({
         } as any);
       }
       setShowSuccess(true);
+      if (isEditMode) {
+        setTimeout(() => {
+          setShowSuccess(false);
+          onBack();
+        }, 2000);
+      }
     } catch (err: any) {
       alert(`Submission failed: ${err.message}`);
     } finally {
@@ -450,7 +525,7 @@ export const PASForm: React.FC<PASFormProps> = ({
     }
   };
 
-  if (showSuccess) {
+  if (showSuccess && !isEditMode) {
     return (
       <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-8 sm:p-12 text-center max-w-xl mx-auto my-12 font-sans">
         <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -478,6 +553,8 @@ export const PASForm: React.FC<PASFormProps> = ({
       </div>
     );
   }
+
+  const scaleFactor = isGeneratingPDF ? 1 : (containerWidth < 794 ? containerWidth / 794 : 1);
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start min-h-0 font-sans print:block">
@@ -520,7 +597,79 @@ export const PASForm: React.FC<PASFormProps> = ({
           </div>
         </div>
 
-        {!isEditMode ? (
+        {isEditMode && (authRole === 'admin' || authRole === 'checker' || authRole === 'approver') && (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+            <h3 className="font-extrabold text-xs text-slate-400 uppercase tracking-widest pb-2 border-b border-slate-100 mb-2">Stage Control & Actions</h3>
+            <p className="text-slate-600 text-xs leading-relaxed font-semibold">
+              This application is in review/edit mode. You can edit any field in the form below and click "Save Changes" to update.
+            </p>
+
+            {/* Show Edit PAS Control Number input for checkers, approvers, and admins */}
+            <div className="bg-amber-50/70 p-4 rounded-lg border border-amber-200/50 space-y-2 mt-2">
+              <label className="block text-[10px] font-black uppercase tracking-wider text-amber-800">
+                Edit PAS Control Number
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={controlNumber}
+                  onChange={(e) => setControlNumber(e.target.value.toUpperCase())}
+                  placeholder="PAS-26-XXX"
+                  className="flex-1 bg-white border border-slate-300 rounded px-2.5 py-1.5 text-xs font-mono font-bold uppercase text-slate-900 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+                />
+                <button
+                  type="button"
+                  disabled={isSavingControlNo || controlNumber.trim() === (initialData?.id || '') || !controlNumber.trim()}
+                  onClick={async () => {
+                    if (!controlNumber.trim()) return;
+                    try {
+                      setIsSavingControlNo(true);
+                      await onSubmitApp?.({
+                        ...formData,
+                        id: controlNumber.trim(),
+                      } as any);
+                      alert("PAS Control Number successfully updated!");
+                    } catch (err: any) {
+                      console.error("Failed to update PAS Control Number:", err);
+                      alert(`Failed to update: ${err.message}`);
+                    } finally {
+                      setIsSavingControlNo(false);
+                    }
+                  }}
+                  className="bg-amber-600 hover:bg-amber-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-extrabold text-[10px] uppercase tracking-wider px-3.5 py-1.5 rounded transition-colors cursor-pointer shrink-0"
+                >
+                  {isSavingControlNo ? "Saving..." : "Update"}
+                </button>
+              </div>
+              <p className="text-[9px] text-amber-700 font-medium leading-relaxed">
+                Notice: Changing this will rename the document key in Firestore and automatically update linked records.
+              </p>
+            </div>
+
+            <div className="pt-2">
+              <button
+                onClick={onBack}
+                className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold uppercase tracking-wider text-[10px] rounded-lg border transition-colors inline-block text-center cursor-pointer"
+              >
+                Return to Dashboard List
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Success banner for in-place edits */}
+        {isEditMode && showSuccess && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-green-50 border border-green-200 text-green-700 p-4 rounded-lg mb-4 flex items-center gap-3 text-left"
+          >
+            <CheckCircle2 className="w-5 h-5 text-green-600" />
+            <span className="font-bold text-xs">Changes saved successfully! Returning to list...</span>
+          </motion.div>
+        )}
+
+        {(!isEditMode || (authRole === 'admin' || authRole === 'checker' || authRole === 'approver')) ? (
           <form onSubmit={handleFinalSubmit} className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-5 text-left">
             <div>
               <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 border-b border-slate-100 pb-2 mb-4">
@@ -896,7 +1045,7 @@ export const PASForm: React.FC<PASFormProps> = ({
               <button
                 type="button"
                 onClick={onBack}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold uppercase tracking-wider text-xs transition-colors"
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold uppercase tracking-wider text-xs transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -905,7 +1054,7 @@ export const PASForm: React.FC<PASFormProps> = ({
                 disabled={isSubmitting || !formData.signatureData}
                 className="flex-1 py-2.5 bg-fab-red hover:bg-red-700 disabled:bg-slate-300 text-white rounded-lg font-black uppercase tracking-wider text-xs transition-colors shadow-sm cursor-pointer"
               >
-                {isSubmitting ? 'Submitting...' : 'Transmit PAS Form'}
+                {isSubmitting ? 'Saving...' : isEditMode ? 'Save Changes' : 'Transmit PAS Form'}
               </button>
             </div>
           </form>
@@ -915,10 +1064,11 @@ export const PASForm: React.FC<PASFormProps> = ({
             <p className="text-slate-600 text-xs leading-relaxed font-semibold">
               This application is in review mode. You can inspect the document structure on the right side.
             </p>
+
             <div className="pt-2">
               <button
                 onClick={onBack}
-                className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold uppercase tracking-wider text-[10px] rounded-lg border transition-colors inline-block text-center"
+                className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold uppercase tracking-wider text-[10px] rounded-lg border transition-colors inline-block text-center cursor-pointer"
               >
                 Return to Dashboard List
               </button>
@@ -941,17 +1091,34 @@ export const PASForm: React.FC<PASFormProps> = ({
         </div>
 
         {/* Printable actual form frame */}
-        <div className="bg-slate-100 p-4 sm:p-6 rounded-xl border border-slate-200 overflow-x-auto print:border-none print:shadow-none print:p-0 print:bg-white select-none">
-          
-          <div 
-            ref={printAreaRef}
-            className="w-[794px] h-[1123px] bg-white text-black p-10 select-none shadow-md print:shadow-none font-serif relative border border-slate-300/40 print:border-none mx-auto print:m-0"
+        <div 
+          ref={previewParentRef}
+          className="bg-slate-100 p-4 sm:p-6 rounded-xl border border-slate-200 overflow-x-auto print:border-none print:shadow-none print:p-0 print:bg-white select-none"
+        >
+          <div
             style={{
-              minWidth: '794px',
-              maxWidth: '794px',
-              aspectRatio: '1 / 1.414'
+              height: `${1123 * scaleFactor}px`,
+              width: '100%',
+              overflow: 'hidden',
+              position: 'relative',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'flex-start'
             }}
+            className="print:h-auto print:overflow-visible print:block"
           >
+            <div 
+              ref={printAreaRef}
+              className="w-[794px] h-[1123px] bg-white text-black p-10 select-none shadow-md print:shadow-none font-serif relative border border-slate-300/40 print:border-none mx-auto print:m-0"
+              style={{
+                minWidth: '794px',
+                maxWidth: '794px',
+                aspectRatio: '1 / 1.414',
+                transform: `scale(${scaleFactor})`,
+                transformOrigin: 'top center',
+                flexShrink: 0
+              }}
+            >
             {/* Header section with logos */}
             <div className="flex justify-between items-start border-b border-slate-950 pb-4 font-sans select-none">
               <div className="flex gap-4 items-center">
@@ -997,7 +1164,7 @@ export const PASForm: React.FC<PASFormProps> = ({
             <div className="font-sans border-l border-r border-b border-slate-950 grid grid-cols-12 text-left text-[10px] leading-tight select-none">
               
               {/* Field 1: Service Provider */}
-              <div className="col-span-6 border-r border-slate-950 p-2 h-[45px]">
+              <div className="col-span-5 border-r border-slate-950 p-2 h-[45px]">
                 <p className="text-[8px] font-extrabold text-slate-500 uppercase tracking-wide">1. Name of Service Provider:</p>
                 <p className="text-[11px] font-extrabold uppercase mt-1 text-slate-800 truncate">{formData.serviceProviderName || ' '}</p>
               </div>
@@ -1009,13 +1176,13 @@ export const PASForm: React.FC<PASFormProps> = ({
               </div>
 
               {/* Field 3: Voyage No */}
-              <div className="col-span-1.5 border-r border-slate-950 p-2 h-[45px] col-span-2">
+              <div className="col-span-2 border-r border-slate-950 p-2 h-[45px]">
                 <p className="text-[8px] font-extrabold text-slate-500 uppercase tracking-wide">3. Voyage No.:</p>
                 <p className="text-[11px] font-bold uppercase mt-1 text-slate-800">{formData.voyageNo || ' '}</p>
               </div>
 
               {/* Field 4: Voyage Type */}
-              <div className="p-2 h-[45px] col-span-1 flex flex-col justify-between">
+              <div className="col-span-2 p-2 h-[45px] flex flex-col justify-between">
                 <p className="text-[8px] font-extrabold text-slate-500 uppercase tracking-wide">4. Voyage Type:</p>
                 <div className="flex flex-col gap-0.5 text-[8px] font-bold mt-1 text-slate-700 select-none">
                   <div className="flex items-center gap-1">
@@ -1157,8 +1324,8 @@ export const PASForm: React.FC<PASFormProps> = ({
                 <div className="border-t border-slate-400 pt-1 text-center leading-none">
                   <p className="text-[9px] font-black uppercase text-slate-800 line-clamp-1">{formData.submitterName || 'SERVICE REPRESENTATIVE'}</p>
                   <p className="text-[6.5px] font-extrabold text-slate-400 uppercase tracking-widest mt-1">Service Provider's Representative</p>
-                  <p className="text-[6.5px] text-slate-500 font-extrabold tracking-tight mt-0.5 mt-1">
-                    Date: {isEditMode && initialData?.createdAt ? new Date(initialData.createdAt).toLocaleDateString() : new Date().toLocaleDateString()}
+                  <p className="text-[6.5px] text-slate-500 font-extrabold tracking-tight mt-1">
+                    Submitted: {formatSystemDateTime(isEditMode && initialData?.submittedAt ? initialData.submittedAt : (isEditMode && initialData?.createdAt ? initialData.createdAt : new Date().toISOString()))}
                   </p>
                 </div>
               </div>
@@ -1184,7 +1351,7 @@ export const PASForm: React.FC<PASFormProps> = ({
                   <p className="text-[9px] font-black uppercase text-slate-800 line-clamp-1">{initialData?.checkedByName || 'AFAB AUTHORIZED OFFICIAL'}</p>
                   <p className="text-[6.5px] font-extrabold text-slate-400 uppercase tracking-widest mt-1">AFAB Authorized Official</p>
                   <p className="text-[6.5px] text-slate-500 font-extrabold tracking-tight mt-1">
-                    Date: {initialData?.checkedAt ? new Date(initialData.checkedAt).toLocaleDateString() : ' '}
+                    Checked: {initialData?.checkedAt ? formatSystemDateTime(initialData.checkedAt) : ' '}
                   </p>
                 </div>
               </div>
@@ -1210,7 +1377,7 @@ export const PASForm: React.FC<PASFormProps> = ({
                   <p className="text-[9px] font-black uppercase text-slate-800 line-clamp-1">{initialData?.approvedByName || 'AFAB AUTHORIZED OFFICIAL'}</p>
                   <p className="text-[6.5px] font-extrabold text-slate-400 uppercase tracking-widest mt-1">AFAB Authorized Official</p>
                   <p className="text-[6.5px] text-slate-500 font-extrabold tracking-tight mt-1">
-                    Date: {initialData?.approvedAt ? new Date(initialData.approvedAt).toLocaleDateString() : ' '}
+                    Approved: {initialData?.approvedAt ? formatSystemDateTime(initialData.approvedAt) : ' '}
                   </p>
                 </div>
               </div>
@@ -1229,6 +1396,7 @@ export const PASForm: React.FC<PASFormProps> = ({
             </div>
 
           </div>
+        </div>
         </div>
 
       </div>

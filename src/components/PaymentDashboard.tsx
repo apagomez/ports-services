@@ -4,21 +4,24 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, AreaChart, Area, LabelList
 } from 'recharts';
-import { PaymentDashboardData } from '../types';
-import { Landmark, TrendingUp, Anchor, Ship, PlusCircle } from 'lucide-react';
+import { PaymentDashboardData, VesselData } from '../types';
+import { Landmark, TrendingUp, Anchor, Ship, PlusCircle, Star, Search, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface PaymentDashboardProps {
   data: PaymentDashboardData;
+  vesselData: VesselData[];
 }
 
 // Official Freeport Area of Bataan (FAB) & Port Regulations navigation/regulatory signaling colors:
 const COLORS = ['#004a99', '#10b981', '#fdb913', '#ed1c24', '#00aeef', '#f97316', '#6366f1'];
 
-export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data }) => {
+export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vesselData }) => {
   const [revenueFilter, setRevenueFilter] = React.useState<'All' | 'Foreign' | 'Domestic'>('All');
   const [activeTab, setActiveTab] = React.useState<'overview' | 'vmf' | 'tugboat' | 'ancillary'>('overview');
   const [selectedServiceType, setSelectedServiceType] = React.useState<string | null>(null);
+  const [activeModal, setActiveModal] = React.useState<'provider' | 'shippingLine' | 'consignee' | null>(null);
+  const [modalSearch, setModalSearch] = React.useState<string>('');
   
   const months = useMemo(() => [
     'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 
@@ -116,6 +119,7 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data }) => {
       byType: Object.entries(byType).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value),
       byTerminal: Object.entries(byTerminal).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value),
       byProvider: Object.entries(byProvider).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 5),
+      byProviderAll: Object.entries(byProvider).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value),
       totalFiltered: filtered.reduce((acc, curr) => acc + curr.total, 0),
       count: filtered.length
     };
@@ -186,6 +190,103 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data }) => {
       return idx >= startIndex && idx <= endIndex;
     });
   }, [data.tugboatMonthly, startMonth, endMonth, monthToIndex]);
+
+  const topContributors = useMemo(() => {
+    const shippingLinesVol: Record<string, number> = {};
+    const consigneesVol: Record<string, number> = {};
+    const shippingLinesPeso: Record<string, number> = {};
+    const consigneesPeso: Record<string, number> = {};
+
+    const startIndex = monthToIndex(startMonth);
+    const endIndex = monthToIndex(endMonth);
+
+    // Filter transaction payments to match the selected month range and orientation
+    const filteredPayments = (data.voyagePayments || []).filter(p => {
+      const idx = monthToIndex(p.month);
+      if (idx < startIndex || idx > endIndex) return false;
+
+      const isForeign = p.controlNo.includes('-F');
+      const isDomestic = p.controlNo.includes('-D');
+
+      if (revenueFilter === 'Foreign') {
+        return isForeign;
+      } else if (revenueFilter === 'Domestic') {
+        return isDomestic;
+      }
+      return true;
+    });
+
+    // Filter vessels to match the currently selected month range and orientation for volume activity
+    const filteredVessels = (vesselData || []).filter(v => {
+      const idx = monthToIndex(v.month);
+      if (idx < startIndex || idx > endIndex) return false;
+
+      if (revenueFilter === 'Foreign') {
+        return v.orientation === 'Foreign';
+      } else if (revenueFilter === 'Domestic') {
+        return v.orientation === 'Domestic';
+      }
+      return true;
+    });
+
+    // Accumulate actual volume activity from vessel logs
+    filteredVessels.forEach(v => {
+      const sl = v.shippingLine?.trim();
+      const cg = v.consignee?.trim();
+      const cargoVol = (v.cargoVolumeMT || 0) + (v.cargoVolumeCBM || 0);
+
+      if (sl && sl.toUpperCase() !== 'UNKNOWN' && sl !== '') {
+        shippingLinesVol[sl] = (shippingLinesVol[sl] || 0) + cargoVol;
+      }
+      if (cg && cg.toUpperCase() !== 'UNKNOWN' && cg !== '') {
+        consigneesVol[cg] = (consigneesVol[cg] || 0) + cargoVol;
+      }
+    });
+
+    // Accumulate actual fees paid from GID 261075415 transaction records
+    filteredPayments.forEach(p => {
+      const sl = p.shippingAgency?.trim();
+      const cg = p.consignee?.trim();
+
+      if (sl && sl.toUpperCase() !== 'UNKNOWN' && sl !== '') {
+        shippingLinesPeso[sl] = (shippingLinesPeso[sl] || 0) + p.vesselTotal;
+      }
+      if (cg && cg.toUpperCase() !== 'UNKNOWN' && cg !== '') {
+        consigneesPeso[cg] = (consigneesPeso[cg] || 0) + p.cargoTotal;
+      }
+    });
+
+    const topShippingLine = Object.entries(shippingLinesPeso).sort((a, b) => b[1] - a[1])[0] || ['None', 0];
+    const topConsignee = Object.entries(consigneesPeso).sort((a, b) => b[1] - a[1])[0] || ['None', 0];
+    const topProvider = ancillaryStats.byProvider[0] || { name: 'None', value: 0 };
+
+    const topShippingLineVol = shippingLinesVol[topShippingLine[0]] || 0;
+    const topConsigneeVol = consigneesVol[topConsignee[0]] || 0;
+
+    const sortedShippingLines = Object.entries(shippingLinesPeso)
+      .map(([name, peso]) => ({
+        name,
+        peso,
+        volume: shippingLinesVol[name] || 0
+      }))
+      .sort((a, b) => b.peso - a.peso);
+
+    const sortedConsignees = Object.entries(consigneesPeso)
+      .map(([name, peso]) => ({
+        name,
+        peso,
+        volume: consigneesVol[name] || 0
+      }))
+      .sort((a, b) => b.peso - a.peso);
+
+    return {
+      shippingLine: [topShippingLine[0], topShippingLineVol, topShippingLine[1]], // [Name, Volume, PesoAmount]
+      consignee: [topConsignee[0], topConsigneeVol, topConsignee[1]], // [Name, Volume, PesoAmount]
+      provider: topProvider,
+      sortedShippingLines,
+      sortedConsignees
+    };
+  }, [vesselData, data.voyagePayments, ancillaryStats, startMonth, endMonth, revenueFilter, monthToIndex]);
 
   const monthsInSelection = useMemo(() => {
     const startIndex = monthToIndex(startMonth);
@@ -444,6 +545,50 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data }) => {
                 </BarChart>
               </ResponsiveContainer>
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <button 
+              onClick={() => { setActiveModal('provider'); setModalSearch(''); }}
+              className="group text-left bg-gradient-to-br from-indigo-900 to-indigo-950 p-6 rounded-xl border border-indigo-800 text-white shadow-sm relative overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:shadow-indigo-950/20 active:scale-[0.98] cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full animate-in fade-in zoom-in duration-300"
+            >
+              <Star className="absolute right-[-10px] bottom-[-10px] h-24 w-24 text-indigo-800 opacity-20 group-hover:scale-110 group-hover:rotate-12 transition-transform duration-300" />
+              <div className="flex justify-between items-start mb-2">
+                <span className="text-[10px] font-mono uppercase tracking-widest text-indigo-300 font-bold">Top Service Provider</span>
+                <span className="text-[9px] font-mono bg-indigo-500/20 px-2 py-0.5 rounded text-indigo-200 opacity-0 group-hover:opacity-100 transition-opacity">View All →</span>
+              </div>
+              <h4 className="text-xl font-bold line-clamp-1 mb-2 group-hover:text-indigo-200 transition-colors">{topContributors.provider.name}</h4>
+              <p className="text-2xl font-black text-indigo-100 font-mono">{formatCurrency(topContributors.provider.value as number)}</p>
+              <p className="text-indigo-300 text-xs mt-1">Ancillary Services Revenue Collected</p>
+            </button>
+
+            <button 
+              onClick={() => { setActiveModal('shippingLine'); setModalSearch(''); }}
+              className="group text-left bg-gradient-to-br from-blue-900 to-blue-950 p-6 rounded-xl border border-blue-800 text-white shadow-sm relative overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:shadow-blue-950/20 active:scale-[0.98] cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 w-full animate-in fade-in zoom-in duration-300"
+            >
+              <Star className="absolute right-[-10px] bottom-[-10px] h-24 w-24 text-blue-800 opacity-20 group-hover:scale-110 group-hover:rotate-12 transition-transform duration-300" />
+              <div className="flex justify-between items-start mb-2">
+                <span className="text-[10px] font-mono uppercase tracking-widest text-blue-300 font-bold">Top Shipping Line</span>
+                <span className="text-[9px] font-mono bg-blue-500/20 px-2 py-0.5 rounded text-blue-200 opacity-0 group-hover:opacity-100 transition-opacity">View All →</span>
+              </div>
+              <h4 className="text-xl font-bold line-clamp-1 mb-2 group-hover:text-blue-200 transition-colors">{topContributors.shippingLine[0]}</h4>
+              <p className="text-2xl font-black text-blue-100 font-mono">{formatCurrency(topContributors.shippingLine[2] as number)}</p>
+              <p className="text-blue-300 text-xs mt-1">Shipping Line Revenue Collected</p>
+            </button>
+
+            <button 
+              onClick={() => { setActiveModal('consignee'); setModalSearch(''); }}
+              className="group text-left bg-gradient-to-br from-emerald-900 to-emerald-950 p-6 rounded-xl border border-emerald-800 text-white shadow-sm relative overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:shadow-emerald-950/20 active:scale-[0.98] cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full animate-in fade-in zoom-in duration-300"
+            >
+              <Star className="absolute right-[-10px] bottom-[-10px] h-24 w-24 text-emerald-800 opacity-20 group-hover:scale-110 group-hover:rotate-12 transition-transform duration-300" />
+              <div className="flex justify-between items-start mb-2">
+                <span className="text-[10px] font-mono uppercase tracking-widest text-emerald-300 font-bold">Top Consignee</span>
+                <span className="text-[9px] font-mono bg-emerald-500/20 px-2 py-0.5 rounded text-emerald-200 opacity-0 group-hover:opacity-100 transition-opacity">View All →</span>
+              </div>
+              <h4 className="text-xl font-bold line-clamp-1 mb-2 group-hover:text-emerald-200 transition-colors">{topContributors.consignee[0]}</h4>
+              <p className="text-2xl font-black text-emerald-100 font-mono">{formatCurrency(topContributors.consignee[2] as number)}</p>
+              <p className="text-emerald-300 text-xs mt-1">Consignee Revenue Collected</p>
+            </button>
           </div>
         </React.Fragment>
       )}
@@ -778,18 +923,17 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data }) => {
                     <tr>
                       <th className="p-3">Ctrl No</th>
                       <th className="p-3">Vessel Name</th>
+                      <th className="p-3">Voyage No</th>
                       <th className="p-3">Provider</th>
                       <th className="p-3">Terminal</th>
+                      <th className="p-3">Service Type</th>
                       <th className="p-3">Date Applied</th>
-                      <th className="p-3 text-right">Base Amount</th>
-                      <th className="p-3 text-right">VAT</th>
-                      <th className="p-3 text-right">Total Fee</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
                     {filteredAncillaryRecordsByType.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="p-8 text-center text-slate-400 font-medium font-mono">
+                        <td colSpan={7} className="p-8 text-center text-slate-400 font-medium font-mono">
                           No matching records found for this service type in the chosen time window.
                         </td>
                       </tr>
@@ -798,12 +942,11 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data }) => {
                         <tr key={record.controlNo + '-' + idx} className="hover:bg-slate-50/65 transition-colors">
                           <td className="p-3 font-mono font-bold text-slate-800">{record.controlNo}</td>
                           <td className="p-3 font-semibold uppercase">{record.vesselName || 'UNKNOWN'}</td>
+                          <td className="p-3 font-mono text-[10px] uppercase text-slate-500">{record.voyageNo || '-'}</td>
                           <td className="p-3 text-slate-600">{record.provider}</td>
                           <td className="p-3 text-slate-500 font-mono text-[10px] uppercase">{record.terminal}</td>
+                          <td className="p-3 text-slate-600 font-mono text-[10px] uppercase">{record.serviceType}</td>
                           <td className="p-3 text-slate-500 font-mono">{record.date || record.monthApplied}</td>
-                          <td className="p-3 text-right font-mono text-slate-600">{formatCurrency(record.amount)}</td>
-                          <td className="p-3 text-right font-mono text-slate-500">{formatCurrency(record.vat)}</td>
-                          <td className="p-3 text-right font-mono font-bold text-purple-700">{formatCurrency(record.total)}</td>
                         </tr>
                       ))
                     )}
@@ -834,6 +977,151 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data }) => {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Interactive Details Modal */}
+      {activeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          {/* Backdrop */}
+          <div 
+            onClick={() => setActiveModal(null)}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200"
+          />
+          
+          {/* Modal Container */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col relative z-10 overflow-hidden animate-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className={cn(
+              "px-6 py-5 border-b flex items-center justify-between text-white",
+              activeModal === 'provider' && "bg-gradient-to-r from-indigo-900 to-indigo-950 border-indigo-950",
+              activeModal === 'shippingLine' && "bg-gradient-to-r from-blue-900 to-blue-950 border-blue-950",
+              activeModal === 'consignee' && "bg-gradient-to-r from-emerald-900 to-emerald-950 border-emerald-950"
+            )}>
+              <div>
+                <span className="text-[9px] font-mono uppercase tracking-[0.2em] opacity-80 block mb-0.5">
+                  {activeModal === 'provider' && 'Ancillary Services Breakdown'}
+                  {activeModal === 'shippingLine' && 'Shipping Agencies & Lines Ledger'}
+                  {activeModal === 'consignee' && 'Consignees Cargo Wharfage'}
+                </span>
+                <h3 className="text-lg font-bold font-mono tracking-tight flex items-center">
+                  <Star className="mr-2 h-5 w-5 text-yellow-400 fill-yellow-400" />
+                  {activeModal === 'provider' && 'Ancillary Providers Ranking'}
+                  {activeModal === 'shippingLine' && 'Shipping Line Revenue Ledger'}
+                  {activeModal === 'consignee' && 'Consignee Payment Ranking'}
+                </h3>
+              </div>
+              <button 
+                onClick={() => setActiveModal(null)}
+                className="text-white hover:bg-white/15 p-1.5 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Sub-Header / Search Input */}
+            <div className="p-4 bg-gray-50 border-b border-gray-100 flex flex-col sm:flex-row gap-3 items-center justify-between">
+              <div className="relative w-full sm:max-w-xs">
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                <input 
+                  type="text"
+                  placeholder="Search by name..."
+                  value={modalSearch}
+                  onChange={(e) => setModalSearch(e.target.value)}
+                  className="pl-9 pr-4 py-1.5 w-full bg-white border border-gray-200 rounded-lg text-xs font-sans focus:outline-none focus:ring-2 focus:ring-slate-400 placeholder-gray-400"
+                />
+              </div>
+              <div className="text-[11px] font-mono text-gray-500 text-right w-full sm:w-auto">
+                Period: <span className="font-bold text-gray-700">{startMonth} — {endMonth}</span>
+              </div>
+            </div>
+
+            {/* Scrollable List Table */}
+            <div className="overflow-y-auto flex-1 p-6">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-gray-50 text-[10px] font-mono text-gray-500 uppercase border-b border-gray-100">
+                  <tr>
+                    <th className="p-3 w-12 text-center">Rank</th>
+                    <th className="p-3">Entity Name</th>
+                    <th className="p-3 text-right">Total Collection</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 text-xs text-gray-700">
+                  {(() => {
+                    let items: { name: string; value: number }[] = [];
+                    if (activeModal === 'provider') {
+                      items = (ancillaryStats.byProviderAll || []).map(p => ({
+                        name: p.name,
+                        value: p.value
+                      }));
+                    } else if (activeModal === 'shippingLine') {
+                      items = (topContributors.sortedShippingLines || []).map(s => ({
+                        name: s.name,
+                        value: s.peso
+                      }));
+                    } else if (activeModal === 'consignee') {
+                      items = (topContributors.sortedConsignees || []).map(c => ({
+                        name: c.name,
+                        value: c.peso
+                      }));
+                    }
+
+                    const filteredItems = items.filter(item => 
+                      item.name.toLowerCase().includes(modalSearch.toLowerCase())
+                    );
+
+                    if (filteredItems.length === 0) {
+                      return (
+                        <tr>
+                          <td colSpan={3} className="p-8 text-center text-gray-400 font-mono font-medium">
+                            No matching items found.
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    const overallTotal = items.reduce((sum, i) => sum + i.value, 0);
+
+                    return filteredItems.map((item, idx) => {
+                      const absoluteRank = items.findIndex(orig => orig.name === item.name) + 1;
+                      const percentage = overallTotal > 0 ? (item.value / overallTotal) * 100 : 0;
+                      return (
+                        <tr key={item.name + '-' + idx} className="hover:bg-slate-50/70 transition-colors">
+                          <td className="p-3 text-center font-mono font-bold text-gray-400">
+                            #{absoluteRank}
+                          </td>
+                          <td className="p-3">
+                            <p className="font-semibold text-gray-900 uppercase tracking-tight">{item.name}</p>
+                            <p className="text-[10px] text-gray-400 font-mono mt-0.5">
+                              {percentage.toFixed(1)}% of category collection
+                            </p>
+                          </td>
+                          <td className={cn(
+                            "p-3 text-right font-mono font-bold",
+                            activeModal === 'provider' && "text-indigo-600",
+                            activeModal === 'shippingLine' && "text-blue-600",
+                            activeModal === 'consignee' && "text-emerald-600"
+                          )}>
+                            {formatCurrency(item.value)}
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
+              <button 
+                onClick={() => setActiveModal(null)}
+                className="px-4 py-2 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-bold rounded-lg cursor-pointer transition-colors"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>
