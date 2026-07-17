@@ -25,8 +25,7 @@ import {
   ShieldAlert,
   AlertTriangle,
   Info,
-  AlertCircle,
-  Sparkles
+  AlertCircle
 } from 'lucide-react';
 import {
   PieChart,
@@ -56,7 +55,6 @@ import { VesselDetailDrawer } from './components/VesselDetailDrawer';
 import { LoginForm } from './components/LoginForm';
 import { UserDashboard } from './components/UserDashboard';
 import { ApplicationDashboard } from './components/ApplicationDashboard';
-import { SampleDashboard } from './components/SampleDashboard';
 import { formatSystemDate } from './utils/dateFormatter';
 import { safeStorage } from './utils/safeStorage';
 import { initAuth, logout as googleLogout, googleSignIn, getAccessToken, appendApplicationToSheet, deleteApplicationFromSheet } from './services/googleSheetsService';
@@ -146,7 +144,7 @@ export default function App() {
   ], []);
   const [startMonth, setStartMonth] = useState<string>('JANUARY');
   const [endMonth, setEndMonth] = useState<string>('DECEMBER');
-  const [activeTab, setActiveTab] = useState<'vessels' | 'payments' | 'cargo' | 'stats' | 'applications' | 'sample'>('vessels');
+  const [activeTab, setActiveTab] = useState<'vessels' | 'payments' | 'cargo' | 'stats' | 'applications'>('vessels');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
 
@@ -659,8 +657,7 @@ export default function App() {
                 { id: 'payments', label: 'Payments', icon: CreditCard, colorClass: 'text-fab-green', activeBorder: 'border-fab-green', bgActive: 'bg-fab-green/5', beacon: 'bg-fab-green' },
                 { id: 'cargo', label: 'Cargo', icon: Package, colorClass: 'text-fab-gold', activeBorder: 'border-fab-gold', bgActive: 'bg-fab-gold/5', beacon: 'bg-fab-gold' },
                 { id: 'stats', label: 'Statistics', icon: BarChart3, colorClass: 'text-fab-cyan', activeBorder: 'border-fab-cyan', bgActive: 'bg-fab-cyan/5', beacon: 'bg-fab-cyan' },
-                { id: 'applications', label: 'Applications', icon: FileText, colorClass: 'text-fab-red', activeBorder: 'border-fab-red', bgActive: 'bg-fab-red/5', beacon: 'bg-fab-red' },
-                { id: 'sample', label: 'Sample', icon: Sparkles, colorClass: 'text-indigo-600', activeBorder: 'border-indigo-600', bgActive: 'bg-indigo-600/5', beacon: 'bg-indigo-600' }
+                { id: 'applications', label: 'Applications', icon: FileText, colorClass: 'text-fab-red', activeBorder: 'border-fab-red', bgActive: 'bg-fab-red/5', beacon: 'bg-fab-red' }
               ].map((tab) => {
                 const isActive = activeTab === tab.id;
                 const TabIcon = tab.icon;
@@ -696,8 +693,7 @@ export default function App() {
                         tab.id === 'payments' && "bg-fab-green shadow-[0_-1px_6px_rgba(16,185,129,0.4)]",
                         tab.id === 'cargo' && "bg-fab-gold shadow-[0_-1px_6px_rgba(253,185,19,0.4)]",
                         tab.id === 'stats' && "bg-fab-cyan shadow-[0_-1px_6px_rgba(0,174,239,0.4)]",
-                        tab.id === 'applications' && "bg-fab-red shadow-[0_-1px_6px_rgba(237,28,36,0.4)]",
-                        tab.id === 'sample' && "bg-indigo-600 shadow-[0_-1px_6px_rgba(99,102,241,0.4)]"
+                        tab.id === 'applications' && "bg-fab-red shadow-[0_-1px_6px_rgba(237,28,36,0.4)]"
                       )} />
                     )}
                   </button>
@@ -967,15 +963,34 @@ export default function App() {
                     let sheetErrorMsg = '';
                     let finalAppId = extraFields?.id || id;
                     if (newStatus === 'Approved' && currentApp) {
-                      try {
-                        const syncResult = await appendApplicationToSheet({ ...currentApp, ...extraFields, status: 'Approved', id: finalAppId });
-                        sheetSyncSuccess = true;
-                        if (syncResult && syncResult.finalControlNo) {
-                          finalAppId = syncResult.finalControlNo;
+                      let hasToken = !!(await getAccessToken());
+                      if (!hasToken && authRole === 'admin') {
+                        try {
+                          safeAlert('Google Sheets automatic link required for Admin ledger sync. Opening authorization popup...');
+                          const linkRes = await googleSignIn();
+                          if (linkRes) {
+                            setGoogleUser(linkRes.user);
+                            setGoogleToken(linkRes.accessToken);
+                            hasToken = true;
+                          }
+                        } catch (err: any) {
+                          console.warn('Admin automatic Google Sheets link failed during approval:', err);
                         }
-                      } catch (error: any) {
-                        console.warn('Failed to append to Google Sheets during approval:', error);
-                        sheetErrorMsg = error?.message || 'Authentication or connection failed.';
+                      }
+
+                      if (hasToken) {
+                        try {
+                          const syncResult = await appendApplicationToSheet({ ...currentApp, ...extraFields, status: 'Approved', id: finalAppId });
+                          sheetSyncSuccess = true;
+                          if (syncResult && syncResult.finalControlNo) {
+                            finalAppId = syncResult.finalControlNo;
+                          }
+                        } catch (error: any) {
+                          console.warn('Failed to append to Google Sheets during approval:', error);
+                          sheetErrorMsg = error?.message || 'Authentication or connection failed.';
+                        }
+                      } else {
+                        sheetErrorMsg = 'Google Sheets was not connected.';
                       }
                     }
 
@@ -994,8 +1009,27 @@ export default function App() {
                       let sheetDeleteMsg = '';
                       let sheetDeleteSuccess = false;
                       try {
-                        await deleteApplicationFromSheet(currentApp);
-                        sheetDeleteSuccess = true;
+                        let hasToken = !!(await getAccessToken());
+                        if (!hasToken && authRole === 'admin') {
+                          try {
+                            safeAlert('Google Sheets automatic link required to remove record from ledger. Opening authorization popup...');
+                            const linkRes = await googleSignIn();
+                            if (linkRes) {
+                              setGoogleUser(linkRes.user);
+                              setGoogleToken(linkRes.accessToken);
+                              hasToken = true;
+                            }
+                          } catch (err: any) {
+                            console.warn('Admin automatic Google Sheets link failed during rejection/revert:', err);
+                          }
+                        }
+
+                        if (hasToken) {
+                          await deleteApplicationFromSheet(currentApp);
+                          sheetDeleteSuccess = true;
+                        } else {
+                          sheetDeleteMsg = 'Google Sheets was not connected.';
+                        }
                       } catch (error: any) {
                         console.warn('Failed to delete from Google Sheets during revert/rejection:', error);
                         sheetDeleteMsg = error?.message || 'Failed to authenticate or connect.';
@@ -1025,7 +1059,21 @@ export default function App() {
 
                   // Sync to Google Sheets if it is already approved
                   if (mergedApp.status === 'Approved') {
-                    const hasToken = !!(await getAccessToken());
+                    let hasToken = !!(await getAccessToken());
+                    if (!hasToken && authRole === 'admin') {
+                      try {
+                        safeAlert('Google Sheets automatic link required to update ledger during edit. Opening authorization popup...');
+                        const linkRes = await googleSignIn();
+                        if (linkRes) {
+                          setGoogleUser(linkRes.user);
+                          setGoogleToken(linkRes.accessToken);
+                          hasToken = true;
+                        }
+                      } catch (err: any) {
+                        console.warn('Admin automatic Google Sheets link failed during app edit:', err);
+                      }
+                    }
+
                     if (hasToken) {
                       try {
                         await appendApplicationToSheet(mergedApp as VesselApplication);
@@ -1085,15 +1133,6 @@ export default function App() {
               exit={{ opacity: 0, y: -10 }}
             >
               <StatisticsDashboard data={allVessels} onVesselSelect={setSelectedVessel} />
-            </motion.div>
-          ) : activeTab === 'sample' ? (
-            <motion.div
-              key="sample"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-            >
-              <SampleDashboard />
             </motion.div>
           ) : null}
         </AnimatePresence>

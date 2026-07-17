@@ -90,6 +90,10 @@ export const signInWithGoogle = async (): Promise<User> => {
   provider.addScope('https://www.googleapis.com/auth/spreadsheets');
   provider.addScope('https://www.googleapis.com/auth/drive.readonly');
   const result = await signInWithPopup(getAuthInstance(), provider);
+  const credential = GoogleAuthProvider.credentialFromResult(result);
+  if (credential?.accessToken) {
+    safeStorage.setItem('google_access_token', credential.accessToken);
+  }
   return result.user;
 };
 

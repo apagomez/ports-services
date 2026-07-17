@@ -13,11 +13,32 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
   const [error, setError] = useState('');
   const [isSigningInWithGoogle, setIsSigningInWithGoogle] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const u = username.toLowerCase();
     if (u === 'admin' && password === 'admin') {
-      onLogin('admin', 'admin@example.com');
+      try {
+        setIsSigningInWithGoogle(true);
+        setError('');
+        const { googleSignIn } = await import('../services/googleSheetsService');
+        // Automatically request Google Sheets linking for the admin during their login step
+        const googleRes = await googleSignIn();
+        if (googleRes) {
+          onLogin('admin', googleRes.user.email || 'admin@example.com');
+        } else {
+          onLogin('admin', 'admin@example.com');
+        }
+      } catch (err: any) {
+        if (err?.code === 'auth/popup-closed-by-user' || err?.message?.includes('popup-closed-by-user') || err?.code === 'auth/cancelled-popup-request') {
+          // If popup is closed/cancelled, still log them in so they can access the station
+          onLogin('admin', 'admin@example.com');
+        } else {
+          console.error('Admin automatic Google Sheets link failed:', err);
+          onLogin('admin', 'admin@example.com');
+        }
+      } finally {
+        setIsSigningInWithGoogle(false);
+      }
     } else if (u === 'user' && password === 'user') {
       onLogin('user', 'user@example.com');
     } else if (u === 'checker' && password === 'checker') {
@@ -35,7 +56,11 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
       setError('');
       const googleUser = await signInWithGoogle();
       if (googleUser && googleUser.email) {
-        onLogin('user', googleUser.email);
+        const emailLower = googleUser.email.toLowerCase();
+        // Automatically assign admin role if logged in with workspace owner email
+        const isAdminEmail = emailLower === 'raphael.monta.gomez@gmail.com' || emailLower.startsWith('admin');
+        const role = isAdminEmail ? 'admin' : 'user';
+        onLogin(role, googleUser.email);
       } else {
         setError('Google sign-in completed but email was not found.');
       }
