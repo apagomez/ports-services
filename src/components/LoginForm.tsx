@@ -13,32 +13,11 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
   const [error, setError] = useState('');
   const [isSigningInWithGoogle, setIsSigningInWithGoogle] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const u = username.toLowerCase();
     if (u === 'admin' && password === 'admin') {
-      try {
-        setIsSigningInWithGoogle(true);
-        setError('');
-        const { googleSignIn } = await import('../services/googleSheetsService');
-        // Automatically request Google Sheets linking for the admin during their login step
-        const googleRes = await googleSignIn();
-        if (googleRes) {
-          onLogin('admin', googleRes.user.email || 'admin@example.com');
-        } else {
-          onLogin('admin', 'admin@example.com');
-        }
-      } catch (err: any) {
-        if (err?.code === 'auth/popup-closed-by-user' || err?.message?.includes('popup-closed-by-user') || err?.code === 'auth/cancelled-popup-request') {
-          // If popup is closed/cancelled, still log them in so they can access the station
-          onLogin('admin', 'admin@example.com');
-        } else {
-          console.error('Admin automatic Google Sheets link failed:', err);
-          onLogin('admin', 'admin@example.com');
-        }
-      } finally {
-        setIsSigningInWithGoogle(false);
-      }
+      onLogin('admin', 'admin@example.com');
     } else if (u === 'user' && password === 'user') {
       onLogin('user', 'user@example.com');
     } else if (u === 'checker' && password === 'checker') {
