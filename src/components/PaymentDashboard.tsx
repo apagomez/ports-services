@@ -4,8 +4,8 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, AreaChart, Area, LabelList
 } from 'recharts';
-import { PaymentDashboardData, VesselData } from '../types';
-import { Landmark, TrendingUp, Anchor, Ship, PlusCircle, Star, Search, X } from 'lucide-react';
+import { PaymentDashboardData, VesselData, VoyagePaymentRecord } from '../types';
+import { Landmark, TrendingUp, Anchor, Ship, PlusCircle, Star, Search, X, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface PaymentDashboardProps {
@@ -18,8 +18,10 @@ const COLORS = ['#004a99', '#10b981', '#fdb913', '#ed1c24', '#00aeef', '#f97316'
 
 export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vesselData }) => {
   const [revenueFilter, setRevenueFilter] = React.useState<'All' | 'Foreign' | 'Domestic'>('All');
+  const [terminalFilter, setTerminalFilter] = React.useState<string>('All');
   const [activeTab, setActiveTab] = React.useState<'overview' | 'vmf' | 'tugboat' | 'ancillary'>('overview');
   const [selectedServiceType, setSelectedServiceType] = React.useState<string | null>(null);
+  const [selectedPayment, setSelectedPayment] = React.useState<VoyagePaymentRecord | null>(null);
   const [activeModal, setActiveModal] = React.useState<'provider' | 'shippingLine' | 'consignee' | null>(null);
   const [modalSearch, setModalSearch] = React.useState<string>('');
   
@@ -33,65 +35,296 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
 
   const monthToIndex = (month: string) => months.indexOf(month.toUpperCase());
 
+  // Fast map lookup by control number for vessel metadata
+  const vesselMap = useMemo(() => {
+    const map = new Map<string, VesselData>();
+    (vesselData || []).forEach(v => {
+      if (v.controlNo) {
+        map.set(v.controlNo.trim().toUpperCase(), v);
+      }
+    });
+    return map;
+  }, [vesselData]);
+
+  // Reliable terminal extraction helper
+  const getRecordTerminal = (record: { controlNo?: string; terminal?: string }) => {
+    if (record.terminal && record.terminal.trim() && record.terminal.trim().toUpperCase() !== 'UNKNOWN') {
+      return record.terminal.trim();
+    }
+    if (record.controlNo) {
+      const v = vesselMap.get(record.controlNo.trim().toUpperCase());
+      if (v && v.terminal && v.terminal.trim() && v.terminal.trim().toUpperCase() !== 'UNKNOWN') {
+        return v.terminal.trim();
+      }
+    }
+    return '';
+  };
+
+  // Aggregated unique terminals across all datasets
+  const uniqueTerminals = useMemo(() => {
+    const termSet = new Set<string>();
+
+    (vesselData || []).forEach(v => {
+      const t = v.terminal?.trim();
+      if (t && t.toUpperCase() !== 'UNKNOWN' && t.toUpperCase() !== 'PORT TERMINAL' && !t.startsWith('#')) {
+        termSet.add(t);
+      }
+    });
+
+    (data.voyagePayments || []).forEach(p => {
+      const t = getRecordTerminal(p);
+      if (t && t.toUpperCase() !== 'UNKNOWN' && t.toUpperCase() !== 'PORT TERMINAL' && !t.startsWith('#')) {
+        termSet.add(t);
+      }
+    });
+
+    (data.ancillaryRecords || []).forEach(a => {
+      const t = a.terminal?.trim();
+      if (t && t.toUpperCase() !== 'UNKNOWN' && t.toUpperCase() !== 'PORT TERMINAL' && !t.startsWith('#')) {
+        termSet.add(t);
+      }
+    });
+
+    return Array.from(termSet).sort();
+  }, [vesselData, data.voyagePayments, data.ancillaryRecords, vesselMap]);
+
+  // Terminal modules data for interactive module selection
+  const terminalModulesData = useMemo(() => {
+    const startIndex = monthToIndex(startMonth);
+    const endIndex = monthToIndex(endMonth);
+
+    const termMap: Record<string, { name: string; count: number; revenue: number; vesselCount: number }> = {};
+
+    uniqueTerminals.forEach(term => {
+      termMap[term] = { name: term, count: 0, revenue: 0, vesselCount: 0 };
+    });
+
+    (vesselData || []).forEach(v => {
+      const idx = monthToIndex(v.month);
+      if (idx < startIndex || idx > endIndex) return;
+      const t = v.terminal?.trim();
+      if (t && termMap[t]) {
+        termMap[t].vesselCount += 1;
+      }
+    });
+
+    (data.voyagePayments || []).forEach(p => {
+      const idx = monthToIndex(p.month);
+      if (idx < startIndex || idx > endIndex) return;
+      const t = getRecordTerminal(p);
+      if (t && termMap[t]) {
+        termMap[t].count += 1;
+        termMap[t].revenue += (p.vesselTotal || 0) + (p.cargoTotal || 0);
+      }
+    });
+
+    (data.ancillaryRecords || []).forEach(a => {
+      const idx = monthToIndex(a.monthApplied);
+      if ((idx >= startIndex && idx <= endIndex) || a.monthApplied === 'UNKNOWN') {
+        const t = a.terminal?.trim();
+        if (t && termMap[t]) {
+          termMap[t].count += 1;
+          termMap[t].revenue += a.total || 0;
+        }
+      }
+    });
+
+    return Object.values(termMap).sort((a, b) => b.revenue - a.revenue || b.vesselCount - a.vesselCount);
+  }, [uniqueTerminals, vesselData, data.voyagePayments, data.ancillaryRecords, startMonth, endMonth, monthToIndex, vesselMap]);
+
+  // Terminal-filtered voyage payments aggregated by month
+  const terminalPaymentsByMonth = useMemo(() => {
+    if (terminalFilter === 'All') return null;
+    const map = new Map<string, { foreignVessel: number; domesticVessel: number; foreignCargo: number; domesticCargo: number; total: number }>();
+
+    months.forEach(m => {
+      map.set(m, { foreignVessel: 0, domesticVessel: 0, foreignCargo: 0, domesticCargo: 0, total: 0 });
+    });
+
+    (data.voyagePayments || []).forEach(p => {
+      const term = getRecordTerminal(p);
+      if (term.toUpperCase() !== terminalFilter.toUpperCase()) return;
+
+      const isForeign = p.controlNo.includes('-F');
+      const month = p.month.toUpperCase();
+      if (!map.has(month)) return;
+
+      const curr = map.get(month)!;
+      const vessel = p.vesselTotal || 0;
+      const cargo = p.cargoTotal || 0;
+
+      if (isForeign) {
+        curr.foreignVessel += vessel;
+        curr.foreignCargo += cargo;
+      } else {
+        curr.domesticVessel += vessel;
+        curr.domesticCargo += cargo;
+      }
+      curr.total += vessel + cargo;
+    });
+
+    return map;
+  }, [data.voyagePayments, terminalFilter, months, vesselMap]);
+
+  // Terminal-filtered fee breakdown aggregated by month
+  const terminalFeesByMonth = useMemo(() => {
+    if (terminalFilter === 'All') return null;
+    const map = new Map<string, {
+      portDues: number;
+      dockage: number;
+      anchorage: number;
+      pilotage: number;
+      usageFee: number;
+      wharfage: number;
+      foreignTotal: number;
+      domesticTotal: number;
+      total: number;
+    }>();
+
+    months.forEach(m => {
+      map.set(m, { portDues: 0, dockage: 0, anchorage: 0, pilotage: 0, usageFee: 0, wharfage: 0, foreignTotal: 0, domesticTotal: 0, total: 0 });
+    });
+
+    (data.voyagePayments || []).forEach(p => {
+      const term = getRecordTerminal(p);
+      if (term.toUpperCase() !== terminalFilter.toUpperCase()) return;
+
+      const isForeign = p.controlNo.includes('-F');
+      const month = p.month.toUpperCase();
+      if (!map.has(month)) return;
+
+      const curr = map.get(month)!;
+      const wharfage = (p.importWharfage || 0) + (p.domesticWharfage || 0);
+
+      curr.portDues += p.portDues || 0;
+      curr.dockage += p.dockage || 0;
+      curr.anchorage += p.anchorage || 0;
+      curr.pilotage += p.pilotage || 0;
+      curr.usageFee += p.usageFee || 0;
+      curr.wharfage += wharfage;
+
+      const rowTot = (p.vesselTotal || 0) + (p.cargoTotal || 0);
+      if (isForeign) {
+        curr.foreignTotal += rowTot;
+      } else {
+        curr.domesticTotal += rowTot;
+      }
+      curr.total += rowTot;
+    });
+
+    return map;
+  }, [data.voyagePayments, terminalFilter, months, vesselMap]);
+
   const filteredRevenue = useMemo(() => {
     const startIndex = monthToIndex(startMonth);
     const endIndex = monthToIndex(endMonth);
 
-    const revenue = data.monthlyRevenue
-      .filter(m => {
-        const idx = monthToIndex(m.month);
-        return idx >= startIndex && idx <= endIndex;
-      })
-      .map(m => {
-        let vessel = m.foreignVessel + m.domesticVessel;
-        let cargo = m.foreignCargo + m.domesticCargo;
-        let total = m.total;
+    if (terminalFilter === 'All') {
+      const revenue = data.monthlyRevenue
+        .filter(m => {
+          const idx = monthToIndex(m.month);
+          return idx >= startIndex && idx <= endIndex;
+        })
+        .map(m => {
+          let vessel = m.foreignVessel + m.domesticVessel;
+          let cargo = m.foreignCargo + m.domesticCargo;
+          let total = m.total;
 
+          if (revenueFilter === 'Foreign') {
+            vessel = m.foreignVessel;
+            cargo = m.foreignCargo;
+            total = vessel + cargo;
+          } else if (revenueFilter === 'Domestic') {
+            vessel = m.domesticVessel;
+            cargo = m.domesticCargo;
+            total = vessel + cargo;
+          }
+
+          return {
+            ...m,
+            vessel,
+            cargo,
+            total: vessel + cargo
+          };
+        });
+
+      return revenue;
+    }
+
+    // Dynamic terminal breakdown
+    return months
+      .filter((_, idx) => idx >= startIndex && idx <= endIndex)
+      .map(month => {
+        const stats = terminalPaymentsByMonth?.get(month) || { foreignVessel: 0, domesticVessel: 0, foreignCargo: 0, domesticCargo: 0, total: 0 };
+        let vessel = stats.foreignVessel + stats.domesticVessel;
+        let cargo = stats.foreignCargo + stats.domesticCargo;
         if (revenueFilter === 'Foreign') {
-          vessel = m.foreignVessel;
-          cargo = m.foreignCargo;
-          total = vessel + cargo;
+          vessel = stats.foreignVessel;
+          cargo = stats.foreignCargo;
         } else if (revenueFilter === 'Domestic') {
-          vessel = m.domesticVessel;
-          cargo = m.domesticCargo;
-          total = vessel + cargo;
+          vessel = stats.domesticVessel;
+          cargo = stats.domesticCargo;
         }
-
         return {
-          ...m,
+          month,
+          foreignVessel: stats.foreignVessel,
+          domesticVessel: stats.domesticVessel,
+          foreignCargo: stats.foreignCargo,
+          domesticCargo: stats.domesticCargo,
           vessel,
           cargo,
-          total: vessel + cargo
+          total: vessel + cargo,
+          totalWithVat: vessel + cargo
         };
       });
-
-    return revenue;
-  }, [data.monthlyRevenue, revenueFilter, startMonth, endMonth, months]);
+  }, [data.monthlyRevenue, revenueFilter, terminalFilter, terminalPaymentsByMonth, startMonth, endMonth, months, monthToIndex]);
 
   const filteredFees = useMemo(() => {
     const startIndex = monthToIndex(startMonth);
     const endIndex = monthToIndex(endMonth);
 
-    return data.feeBreakdown
-      .filter(f => {
-        const idx = monthToIndex(f.month);
-        return idx >= startIndex && idx <= endIndex;
-      })
-      .map(f => {
-        if (revenueFilter === 'All') return { ...f, total: f.portDues + f.dockage + f.anchorage + f.pilotage + f.usageFee + f.wharfage };
+    if (terminalFilter === 'All') {
+      return data.feeBreakdown
+        .filter(f => {
+          const idx = monthToIndex(f.month);
+          return idx >= startIndex && idx <= endIndex;
+        })
+        .map(f => {
+          if (revenueFilter === 'All') return { ...f, total: f.portDues + f.dockage + f.anchorage + f.pilotage + f.usageFee + f.wharfage };
+          const ratio = f.total > 0 ? (revenueFilter === 'Foreign' ? (f.foreignTotal / f.total) : (f.domesticTotal / f.total)) : 0;
+          return {
+            ...f,
+            portDues: f.portDues * (revenueFilter === 'Foreign' ? 1 : 0),
+            usageFee: f.usageFee * (revenueFilter === 'Domestic' ? 1 : 0),
+            dockage: f.dockage * (revenueFilter === 'Foreign' ? 1 : 0),
+            anchorage: f.anchorage * ratio,
+            pilotage: f.pilotage * ratio,
+            wharfage: f.wharfage * ratio,
+            total: revenueFilter === 'Foreign' ? f.foreignTotal : f.domesticTotal
+          };
+        });
+    }
+
+    return months
+      .filter((_, idx) => idx >= startIndex && idx <= endIndex)
+      .map(month => {
+        const f = terminalFeesByMonth?.get(month) || { portDues: 0, dockage: 0, anchorage: 0, pilotage: 0, usageFee: 0, wharfage: 0, foreignTotal: 0, domesticTotal: 0, total: 0 };
         const ratio = f.total > 0 ? (revenueFilter === 'Foreign' ? (f.foreignTotal / f.total) : (f.domesticTotal / f.total)) : 0;
         return {
-          ...f,
-          portDues: f.portDues * (revenueFilter === 'Foreign' ? 1 : 0),
-          usageFee: f.usageFee * (revenueFilter === 'Domestic' ? 1 : 0),
-          dockage: f.dockage * (revenueFilter === 'Foreign' ? 1 : 0),
-          anchorage: f.anchorage * ratio,
-          pilotage: f.pilotage * ratio,
-          wharfage: f.wharfage * ratio,
-          total: revenueFilter === 'Foreign' ? f.foreignTotal : f.domesticTotal
+          month,
+          portDues: f.portDues * (revenueFilter === 'Domestic' ? 0 : 1),
+          dockage: f.dockage * (revenueFilter === 'Domestic' ? 0 : 1),
+          anchorage: revenueFilter === 'All' ? f.anchorage : f.anchorage * ratio,
+          pilotage: revenueFilter === 'All' ? f.pilotage : f.pilotage * ratio,
+          usageFee: f.usageFee * (revenueFilter === 'Foreign' ? 0 : 1),
+          wharfage: revenueFilter === 'All' ? f.wharfage : f.wharfage * ratio,
+          foreignTotal: f.foreignTotal,
+          domesticTotal: f.domesticTotal,
+          total: revenueFilter === 'Foreign' ? f.foreignTotal : revenueFilter === 'Domestic' ? f.domesticTotal : f.total,
+          totalWithVat: revenueFilter === 'Foreign' ? f.foreignTotal : revenueFilter === 'Domestic' ? f.domesticTotal : f.total
         };
       });
-  }, [data.feeBreakdown, revenueFilter, startMonth, endMonth, months]);
+  }, [data.feeBreakdown, revenueFilter, terminalFilter, terminalFeesByMonth, startMonth, endMonth, months, monthToIndex]);
 
   const ancillaryStats = useMemo(() => {
     const startIndex = monthToIndex(startMonth);
@@ -99,7 +332,13 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
 
     const filtered = data.ancillaryRecords.filter(r => {
       const idx = monthToIndex(r.monthApplied);
-      return (idx >= startIndex && idx <= endIndex) || r.monthApplied === 'UNKNOWN';
+      const isWithinMonths = (idx >= startIndex && idx <= endIndex) || r.monthApplied === 'UNKNOWN';
+      if (!isWithinMonths) return false;
+      if (terminalFilter !== 'All') {
+        const term = getRecordTerminal(r);
+        if (term.toUpperCase() !== terminalFilter.toUpperCase()) return false;
+      }
+      return true;
     });
 
     const byType: Record<string, number> = {};
@@ -123,7 +362,7 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
       totalFiltered: filtered.reduce((acc, curr) => acc + curr.total, 0),
       count: filtered.length
     };
-  }, [data.ancillaryRecords, startMonth, endMonth, months, monthToIndex]);
+  }, [data.ancillaryRecords, terminalFilter, startMonth, endMonth, months, monthToIndex, vesselMap]);
 
   const filteredAncillaryRecordsByType = useMemo(() => {
     if (!selectedServiceType) return [];
@@ -133,11 +372,17 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
     return data.ancillaryRecords.filter(r => {
       const idx = monthToIndex(r.monthApplied);
       const isWithinMonths = (idx >= startIndex && idx <= endIndex) || r.monthApplied === 'UNKNOWN';
-      return isWithinMonths && (r.serviceType || 'Other') === selectedServiceType;
+      if (!isWithinMonths) return false;
+      if (terminalFilter !== 'All') {
+        const term = getRecordTerminal(r);
+        if (term.toUpperCase() !== terminalFilter.toUpperCase()) return false;
+      }
+      return (r.serviceType || 'Other') === selectedServiceType;
     });
-  }, [data.ancillaryRecords, selectedServiceType, startMonth, endMonth, monthToIndex]);
+  }, [data.ancillaryRecords, selectedServiceType, terminalFilter, startMonth, endMonth, monthToIndex, vesselMap]);
 
   const vmfFiltered = useMemo(() => {
+    if (terminalFilter !== 'All' && terminalFilter.toUpperCase() !== 'STC') return 0;
     const startIndex = monthToIndex(startMonth);
     const endIndex = monthToIndex(endMonth);
 
@@ -147,9 +392,10 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
         return idx >= startIndex && idx <= endIndex;
       })
       .reduce((acc, curr) => acc + curr.value, 0);
-  }, [data.vmfMonthly, startMonth, endMonth, monthToIndex]);
+  }, [data.vmfMonthly, terminalFilter, startMonth, endMonth, monthToIndex]);
 
   const tugboatFiltered = useMemo(() => {
+    if (terminalFilter !== 'All') return 0;
     const startIndex = monthToIndex(startMonth);
     const endIndex = monthToIndex(endMonth);
 
@@ -159,7 +405,7 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
         return idx >= startIndex && idx <= endIndex;
       })
       .reduce((acc, curr) => acc + curr.value, 0);
-  }, [data.tugboatMonthly, startMonth, endMonth, monthToIndex]);
+  }, [data.tugboatMonthly, terminalFilter, startMonth, endMonth, monthToIndex]);
 
   const vesselCargoTotal = useMemo(() => {
     return filteredRevenue.reduce((acc, curr) => acc + curr.total, 0);
@@ -174,22 +420,24 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
   }, [vesselCargoTotal, vmfFiltered, tugboatFiltered, ancillaryFiltered]);
 
   const vmfFilteredList = useMemo(() => {
+    if (terminalFilter !== 'All' && terminalFilter.toUpperCase() !== 'STC') return [];
     const startIndex = monthToIndex(startMonth);
     const endIndex = monthToIndex(endMonth);
     return data.vmfMonthly.filter(m => {
       const idx = monthToIndex(m.month);
       return idx >= startIndex && idx <= endIndex;
     });
-  }, [data.vmfMonthly, startMonth, endMonth, monthToIndex]);
+  }, [data.vmfMonthly, terminalFilter, startMonth, endMonth, monthToIndex]);
 
   const tugboatFilteredList = useMemo(() => {
+    if (terminalFilter !== 'All') return [];
     const startIndex = monthToIndex(startMonth);
     const endIndex = monthToIndex(endMonth);
     return data.tugboatMonthly.filter(m => {
       const idx = monthToIndex(m.month);
       return idx >= startIndex && idx <= endIndex;
     });
-  }, [data.tugboatMonthly, startMonth, endMonth, monthToIndex]);
+  }, [data.tugboatMonthly, terminalFilter, startMonth, endMonth, monthToIndex]);
 
   const topContributors = useMemo(() => {
     const shippingLinesVol: Record<string, number> = {};
@@ -200,7 +448,7 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
     const startIndex = monthToIndex(startMonth);
     const endIndex = monthToIndex(endMonth);
 
-    // Filter transaction payments to match the selected month range and orientation
+    // Filter transaction payments to match the selected month range, orientation, and terminal
     const filteredPayments = (data.voyagePayments || []).filter(p => {
       const idx = monthToIndex(p.month);
       if (idx < startIndex || idx > endIndex) return false;
@@ -209,23 +457,34 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
       const isDomestic = p.controlNo.includes('-D');
 
       if (revenueFilter === 'Foreign') {
-        return isForeign;
+        if (!isForeign) return false;
       } else if (revenueFilter === 'Domestic') {
-        return isDomestic;
+        if (!isDomestic) return false;
       }
+
+      if (terminalFilter !== 'All') {
+        const term = getRecordTerminal(p);
+        if (term.toUpperCase() !== terminalFilter.toUpperCase()) return false;
+      }
+
       return true;
     });
 
-    // Filter vessels to match the currently selected month range and orientation for volume activity
+    // Filter vessels to match the currently selected month range, orientation, and terminal for volume activity
     const filteredVessels = (vesselData || []).filter(v => {
       const idx = monthToIndex(v.month);
       if (idx < startIndex || idx > endIndex) return false;
 
       if (revenueFilter === 'Foreign') {
-        return v.orientation === 'Foreign';
+        if (v.orientation !== 'Foreign') return false;
       } else if (revenueFilter === 'Domestic') {
-        return v.orientation === 'Domestic';
+        if (v.orientation !== 'Domestic') return false;
       }
+
+      if (terminalFilter !== 'All') {
+        if (v.terminal?.trim()?.toUpperCase() !== terminalFilter.toUpperCase()) return false;
+      }
+
       return true;
     });
 
@@ -286,7 +545,31 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
       sortedShippingLines,
       sortedConsignees
     };
-  }, [vesselData, data.voyagePayments, ancillaryStats, startMonth, endMonth, revenueFilter, monthToIndex]);
+  }, [vesselData, data.voyagePayments, ancillaryStats, startMonth, endMonth, revenueFilter, terminalFilter, monthToIndex, vesselMap]);
+
+  // Filtered Voyage Payment records for the transactions table
+  const filteredVoyagePayments = useMemo(() => {
+    const startIndex = monthToIndex(startMonth);
+    const endIndex = monthToIndex(endMonth);
+
+    return (data.voyagePayments || []).filter(p => {
+      const idx = monthToIndex(p.month);
+      if (idx < startIndex || idx > endIndex) return false;
+
+      const isForeign = p.controlNo.includes('-F');
+      const isDomestic = p.controlNo.includes('-D');
+
+      if (revenueFilter === 'Foreign' && !isForeign) return false;
+      if (revenueFilter === 'Domestic' && !isDomestic) return false;
+
+      if (terminalFilter !== 'All') {
+        const term = getRecordTerminal(p);
+        if (term.toUpperCase() !== terminalFilter.toUpperCase()) return false;
+      }
+
+      return true;
+    });
+  }, [data.voyagePayments, startMonth, endMonth, revenueFilter, terminalFilter, monthToIndex, vesselMap]);
 
   const monthsInSelection = useMemo(() => {
     const startIndex = monthToIndex(startMonth);
@@ -332,10 +615,49 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <h2 className="text-xl font-bold font-mono uppercase tracking-tighter">Financial Overview</h2>
+        <div>
+          <h2 className="text-xl font-bold font-mono uppercase tracking-tighter">Financial Overview</h2>
+          {terminalFilter !== 'All' && (
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-[10px] font-mono uppercase bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded border border-indigo-200 font-bold flex items-center gap-1.5">
+                <span>Terminal:</span>
+                <span className="text-indigo-900 font-extrabold">{terminalFilter}</span>
+                <button 
+                  onClick={() => setTerminalFilter('All')} 
+                  className="hover:text-red-600 ml-0.5 p-0.5 cursor-pointer rounded hover:bg-indigo-100 transition-colors"
+                  title="Clear terminal filter"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            </div>
+          )}
+        </div>
         <div className="flex flex-wrap items-center gap-3">
+          {/* Port Terminal Filter */}
+          <div className="flex items-center bg-white border border-[#141414] rounded-sm p-1 gap-1 shadow-sm">
+            <span className="text-[10px] font-mono uppercase px-2 opacity-60">Terminal:</span>
+            <select 
+              value={terminalFilter}
+              onChange={(e) => setTerminalFilter(e.target.value)}
+              className="text-[10px] font-mono border-none focus:ring-0 bg-transparent uppercase cursor-pointer py-1 font-semibold max-w-[170px]"
+            >
+              <option value="All">All Terminals</option>
+              {uniqueTerminals.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            {terminalFilter !== 'All' && (
+              <button
+                onClick={() => setTerminalFilter('All')}
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer rounded hover:bg-slate-100 transition-colors"
+                title="Reset to All Terminals"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
           {/* Date Filter */}
-          <div className="flex items-center bg-white border border-[#141414] rounded-sm p-1 gap-1">
+          <div className="flex items-center bg-white border border-[#141414] rounded-sm p-1 gap-1 shadow-sm">
             <span className="text-[10px] font-mono uppercase px-2 opacity-60">Period:</span>
             <select 
               value={startMonth}
@@ -379,34 +701,171 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
         </div>
         <div className="relative z-10 flex flex-col xl:flex-row xl:items-center justify-between gap-6">
           <div>
-            <span className="text-[9px] font-mono uppercase tracking-[0.2em] text-indigo-300 bg-indigo-950/60 border border-indigo-800/50 px-2.5 py-1 rounded-full font-bold">
-              Consolidated Performance Ledger
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] font-mono uppercase tracking-[0.2em] text-indigo-300 bg-indigo-950/60 border border-indigo-800/50 px-2.5 py-1 rounded-full font-bold">
+                Consolidated Performance Ledger
+              </span>
+              {terminalFilter !== 'All' && (
+                <span className="text-[9px] font-mono uppercase tracking-[0.2em] text-cyan-300 bg-cyan-950/60 border border-cyan-800/50 px-2.5 py-1 rounded-full font-bold">
+                  {terminalFilter}
+                </span>
+              )}
+            </div>
             <h1 className="text-3xl md:text-4xl font-black mt-3 flex items-baseline gap-2 text-slate-100">
               {formatCurrency(grandConsolidatedTotal)}
             </h1>
             <p className="text-xs text-slate-300 font-mono mt-1">
-              Consolidated Gross Port Revenue for chosen range ({startMonth} — {endMonth})
+              Consolidated Gross Revenue for chosen range ({startMonth} — {endMonth})
+              {terminalFilter !== 'All' && ` • Terminal: ${terminalFilter}`}
             </p>
           </div>
-          <div className="border-t border-slate-800/80 xl:border-t-0 xl:border-l xl:border-slate-800/80 xl:pl-6 pt-4 xl:pt-0 grid grid-cols-2 sm:grid-cols-4 gap-6 text-slate-200">
-            <div>
-              <p className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">Vessel & Cargo</p>
+          <div className="border-t border-slate-800/80 xl:border-t-0 xl:border-l xl:border-slate-800/80 xl:pl-6 pt-4 xl:pt-0 grid grid-cols-2 sm:grid-cols-4 gap-3 text-slate-200">
+            <button 
+              onClick={() => setActiveTab('overview')}
+              className={cn(
+                "text-left p-2.5 rounded-lg transition-all cursor-pointer group border",
+                activeTab === 'overview' 
+                  ? "bg-white/15 border-blue-400/60 ring-2 ring-blue-400/20" 
+                  : "bg-white/5 border-transparent hover:bg-white/10 hover:border-white/20"
+              )}
+            >
+              <p className="text-[10px] text-slate-400 group-hover:text-blue-300 font-mono uppercase tracking-wider flex items-center justify-between">
+                <span>Vessel & Cargo</span>
+                <span className="text-[9px] opacity-60">→</span>
+              </p>
               <p className="text-sm font-bold text-blue-400 mt-0.5">{formatCurrency(vesselCargoTotal)}</p>
-            </div>
-            <div>
-              <p className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">VMF Total</p>
+            </button>
+            <button 
+              onClick={() => setActiveTab('vmf')}
+              className={cn(
+                "text-left p-2.5 rounded-lg transition-all cursor-pointer group border",
+                activeTab === 'vmf' 
+                  ? "bg-white/15 border-green-400/60 ring-2 ring-green-400/20" 
+                  : "bg-white/5 border-transparent hover:bg-white/10 hover:border-white/20"
+              )}
+            >
+              <p className="text-[10px] text-slate-400 group-hover:text-green-300 font-mono uppercase tracking-wider flex items-center justify-between">
+                <span>VMF Total</span>
+                <span className="text-[9px] opacity-60">→</span>
+              </p>
               <p className="text-sm font-bold text-green-400 mt-0.5">{formatCurrency(vmfFiltered)}</p>
-            </div>
-            <div>
-              <p className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">Tugboat Service</p>
+            </button>
+            <button 
+              onClick={() => setActiveTab('tugboat')}
+              className={cn(
+                "text-left p-2.5 rounded-lg transition-all cursor-pointer group border",
+                activeTab === 'tugboat' 
+                  ? "bg-white/15 border-orange-400/60 ring-2 ring-orange-400/20" 
+                  : "bg-white/5 border-transparent hover:bg-white/10 hover:border-white/20"
+              )}
+            >
+              <p className="text-[10px] text-slate-400 group-hover:text-orange-300 font-mono uppercase tracking-wider flex items-center justify-between">
+                <span>Tugboat Service</span>
+                <span className="text-[9px] opacity-60">→</span>
+              </p>
               <p className="text-sm font-bold text-orange-400 mt-0.5">{formatCurrency(tugboatFiltered)}</p>
-            </div>
-            <div>
-              <p className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">Ancillary Services</p>
+            </button>
+            <button 
+              onClick={() => setActiveTab('ancillary')}
+              className={cn(
+                "text-left p-2.5 rounded-lg transition-all cursor-pointer group border",
+                activeTab === 'ancillary' 
+                  ? "bg-white/15 border-purple-400/60 ring-2 ring-purple-400/20" 
+                  : "bg-white/5 border-transparent hover:bg-white/10 hover:border-white/20"
+              )}
+            >
+              <p className="text-[10px] text-slate-400 group-hover:text-purple-300 font-mono uppercase tracking-wider flex items-center justify-between">
+                <span>Ancillary Services</span>
+                <span className="text-[9px] opacity-60">→</span>
+              </p>
               <p className="text-sm font-bold text-purple-400 mt-0.5">{formatCurrency(ancillaryFiltered)}</p>
-            </div>
+            </button>
           </div>
+        </div>
+      </div>
+
+      {/* Interactive Port Terminal Modules Strip */}
+      <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-500">
+              Port Terminal Modules
+            </span>
+            <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">
+              Click a module to display terminal data
+            </span>
+          </div>
+          {terminalFilter !== 'All' && (
+            <button
+              onClick={() => setTerminalFilter('All')}
+              className="text-[10px] font-mono font-bold uppercase text-red-600 hover:text-red-700 hover:underline flex items-center gap-1 cursor-pointer self-start sm:self-auto"
+            >
+              <X className="w-3 h-3" />
+              Reset to All Terminals
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+          {/* All Terminals Module */}
+          <button
+            onClick={() => setTerminalFilter('All')}
+            className={cn(
+              "px-3.5 py-2 rounded-lg border text-left transition-all duration-200 whitespace-nowrap cursor-pointer flex-shrink-0 flex items-center gap-2.5",
+              terminalFilter === 'All'
+                ? "bg-[#141414] text-white border-[#141414] shadow-xs"
+                : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700"
+            )}
+          >
+            <div className={cn(
+              "w-2 h-2 rounded-full",
+              terminalFilter === 'All' ? "bg-emerald-400 animate-pulse" : "bg-slate-400"
+            )} />
+            <div>
+              <p className="text-[10px] font-mono font-bold uppercase leading-none">ALL TERMINALS</p>
+              <p className={cn("text-[9px] font-mono mt-0.5", terminalFilter === 'All' ? "text-slate-300" : "text-slate-500")}>
+                Port-Wide ({uniqueTerminals.length} Terminals)
+              </p>
+            </div>
+          </button>
+
+          {/* Individual Terminal Modules */}
+          {terminalModulesData.map((term) => {
+            const isSelected = terminalFilter.toUpperCase() === term.name.toUpperCase();
+            return (
+              <button
+                key={term.name}
+                onClick={() => setTerminalFilter(prev => prev.toUpperCase() === term.name.toUpperCase() ? 'All' : term.name)}
+                className={cn(
+                  "px-3.5 py-2 rounded-lg border text-left transition-all duration-200 whitespace-nowrap cursor-pointer flex-shrink-0 flex items-center gap-2.5 group",
+                  isSelected
+                    ? "bg-indigo-900 text-white border-indigo-900 shadow-md ring-2 ring-indigo-400/40"
+                    : "bg-white hover:bg-indigo-50/40 border-slate-200 hover:border-indigo-200 text-slate-800"
+                )}
+              >
+                <div className={cn(
+                  "w-2 h-2 rounded-full transition-transform group-hover:scale-125",
+                  isSelected ? "bg-cyan-300" : "bg-indigo-400"
+                )} />
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-[10px] font-mono font-black uppercase tracking-tight">{term.name}</p>
+                    {isSelected && (
+                      <span className="text-[8px] font-mono px-1 rounded bg-cyan-400/30 text-cyan-200 uppercase font-bold">
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <p className={cn(
+                    "text-[9px] font-mono mt-0.5 font-bold",
+                    isSelected ? "text-indigo-200" : "text-indigo-600"
+                  )}>
+                    {formatCurrencyShort(term.revenue)} • {term.vesselCount} calls
+                  </p>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -506,7 +965,12 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
             </div>
 
             <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-              <h3 className="text-lg font-semibold mb-4">Revenue Stream Distribution</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold">Revenue Stream Distribution</h3>
+                <span className="text-[9px] font-mono select-none px-2 py-0.5 bg-blue-50 text-blue-700 rounded-sm border border-blue-100 font-bold">
+                  Click bar to open module
+                </span>
+              </div>
               <div className="h-[300px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={pieData} layout="vertical" margin={{ left: 20, right: 80, top: 20, bottom: 20 }}>
@@ -515,8 +979,24 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
                     <YAxis dataKey="name" type="category" width={120} tick={{ fontSize: 11 }} />
                     <Tooltip formatter={(value: number) => formatCurrency(value)} />
                     <Bar dataKey="value" radius={[0, 4, 4, 0]}>
-                      {pieData.map((_entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      {pieData.map((entry, index) => (
+                        <Cell 
+                          key={`cell-${index}`} 
+                          fill={COLORS[index % COLORS.length]} 
+                          className="cursor-pointer hover:opacity-80 transition-opacity"
+                          onClick={() => {
+                            if (entry.name === 'VMF') setActiveTab('vmf');
+                            else if (entry.name === 'Tugboat') setActiveTab('tugboat');
+                            else if (entry.name === 'Ancillary') setActiveTab('ancillary');
+                            else if (entry.name === 'Vessel Revenue') {
+                              setActiveTab('overview');
+                              setRevenueFilter(prev => prev === 'Foreign' ? 'All' : 'Foreign');
+                            } else if (entry.name === 'Cargo Revenue') {
+                              setActiveTab('overview');
+                              setRevenueFilter(prev => prev === 'Domestic' ? 'All' : 'Domestic');
+                            }
+                          }}
+                        />
                       ))}
                       <LabelList dataKey="value" position="right" formatter={formatCurrencyShort} style={{ fontSize: '10px', fontWeight: 'bold' }} />
                     </Bar>
@@ -589,6 +1069,92 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
               <p className="text-2xl font-black text-emerald-100 font-mono">{formatCurrency(topContributors.consignee[2] as number)}</p>
               <p className="text-emerald-300 text-xs mt-1">Consignee Revenue Collected</p>
             </button>
+          </div>
+
+          {/* Voyage Payment Transactions Ledger */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="p-5 border-b border-gray-100 bg-gray-50/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-bold uppercase tracking-wider text-gray-800 flex items-center gap-2">
+                    <Landmark className="w-4 h-4 text-fab-blue" />
+                    Voyage Payment Transactions Ledger
+                  </h4>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold">
+                    {filteredVoyagePayments.length} Records
+                  </span>
+                  {terminalFilter !== 'All' && (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold">
+                      {terminalFilter}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 font-sans mt-0.5">
+                  Detailed settlement logs of vessel port dues, dockage, and cargo wharfage fees • Click any row to inspect full data
+                </p>
+              </div>
+              <div className="flex items-center gap-2 text-xs font-mono text-slate-500">
+                <span>Period: <strong className="text-slate-800">{startMonth.substring(0,3)} — {endMonth.substring(0,3)}</strong></span>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead className="bg-[#141414] text-white text-[9px] uppercase font-mono tracking-wider">
+                  <tr>
+                    <th className="p-3">Control No.</th>
+                    <th className="p-3">Port Terminal</th>
+                    <th className="p-3">Vessel Name</th>
+                    <th className="p-3">Shipping Line / Agency</th>
+                    <th className="p-3">Consignee</th>
+                    <th className="p-3 text-right">Vessel Charges</th>
+                    <th className="p-3 text-right">Cargo Charges</th>
+                    <th className="p-3 text-right">Actual Payment</th>
+                    <th className="p-3 text-center">Month</th>
+                    <th className="p-3 text-center">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 text-slate-700">
+                  {filteredVoyagePayments.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} className="p-8 text-center text-slate-400 font-mono text-xs">
+                        No voyage payment transactions match the selected terminal ({terminalFilter}) and period ({startMonth} — {endMonth}).
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredVoyagePayments.map((p, idx) => {
+                      const recordTerm = getRecordTerminal(p) || '—';
+                      return (
+                        <tr 
+                          key={p.controlNo + '-' + idx} 
+                          onClick={() => setSelectedPayment(p)}
+                          className="hover:bg-indigo-50/75 transition-colors cursor-pointer group"
+                        >
+                          <td className="p-3 font-mono font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{p.controlNo}</td>
+                          <td className="p-3 font-mono font-bold text-indigo-700 uppercase">
+                            <span className="px-1.5 py-0.5 rounded bg-indigo-50 border border-indigo-100 text-[10px]">
+                              {recordTerm}
+                            </span>
+                          </td>
+                          <td className="p-3 font-semibold uppercase text-slate-900">{p.vesselName || 'UNKNOWN'}</td>
+                          <td className="p-3 text-slate-600 truncate max-w-[150px]">{p.shippingAgency || '—'}</td>
+                          <td className="p-3 text-slate-600 truncate max-w-[150px]">{p.consignee || '—'}</td>
+                          <td className="p-3 text-right font-mono font-semibold text-blue-600">{formatCurrency(p.vesselTotal)}</td>
+                          <td className="p-3 text-right font-mono font-semibold text-emerald-600">{formatCurrency(p.cargoTotal)}</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-900">{formatCurrency(p.actualPayment || (p.vesselTotal + p.cargoTotal))}</td>
+                          <td className="p-3 text-center font-mono text-[10px] uppercase text-slate-500">{p.month}</td>
+                          <td className="p-3 text-center">
+                            <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase font-bold text-indigo-600 group-hover:text-indigo-800 bg-indigo-50 group-hover:bg-indigo-100 px-2 py-1 rounded transition-colors">
+                              Inspect →
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </React.Fragment>
       )}
@@ -876,7 +1442,12 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
             </div>
 
             <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-              <h4 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-6">Collection by Terminal</h4>
+              <div className="flex items-center justify-between mb-6">
+                <h4 className="text-sm font-bold uppercase tracking-wider text-gray-400">Collection by Terminal</h4>
+                <span className="text-[9px] font-mono select-none px-2 py-0.5 bg-purple-50 text-purple-700 rounded-sm border border-purple-100 font-bold">
+                  Click bar to filter terminal
+                </span>
+              </div>
               <div className="h-[350px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={ancillaryStats.byTerminal} layout="vertical" margin={{ left: 20, right: 80, top: 10, bottom: 10 }}>
@@ -885,9 +1456,19 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
                     <YAxis dataKey="name" type="category" width={120} tick={{ fontSize: 11 }} />
                     <Tooltip formatter={(v: number) => formatCurrency(v)} />
                     <Bar dataKey="value" radius={[0, 4, 4, 0]}>
-                      {ancillaryStats.byTerminal.map((_entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
+                      {ancillaryStats.byTerminal.map((entry, index) => {
+                        const isSelected = terminalFilter.toUpperCase() === entry.name.toUpperCase();
+                        return (
+                          <Cell 
+                            key={`cell-${index}`} 
+                            fill={isSelected ? '#6d28d9' : COLORS[index % COLORS.length]} 
+                            className="cursor-pointer hover:opacity-85 transition-opacity"
+                            onClick={() => {
+                              setTerminalFilter(prev => prev.toUpperCase() === entry.name.toUpperCase() ? 'All' : entry.name);
+                            }}
+                          />
+                        );
+                      })}
                       <LabelList dataKey="value" position="right" formatter={formatCurrencyShort} style={{ fontSize: '10px', fontWeight: 'bold' }} />
                     </Bar>
                   </BarChart>
@@ -1033,8 +1614,13 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
                   className="pl-9 pr-4 py-1.5 w-full bg-white border border-gray-200 rounded-lg text-xs font-sans focus:outline-none focus:ring-2 focus:ring-slate-400 placeholder-gray-400"
                 />
               </div>
-              <div className="text-[11px] font-mono text-gray-500 text-right w-full sm:w-auto">
-                Period: <span className="font-bold text-gray-700">{startMonth} — {endMonth}</span>
+              <div className="text-[11px] font-mono text-gray-500 text-right w-full sm:w-auto flex items-center justify-end gap-2">
+                <span>Period: <strong className="text-gray-700">{startMonth} — {endMonth}</strong></span>
+                {terminalFilter !== 'All' && (
+                  <span className="px-2 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold uppercase text-[10px]">
+                    {terminalFilter}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -1121,6 +1707,156 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
                 className="px-4 py-2 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-bold rounded-lg cursor-pointer transition-colors"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Interactive Voyage Payment Inspector Modal */}
+      {selectedPayment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div 
+            onClick={() => setSelectedPayment(null)}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200"
+          />
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col relative z-10 overflow-hidden animate-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 px-6 py-5 border-b border-indigo-950 text-white flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[9px] font-mono uppercase tracking-[0.2em] bg-indigo-500/30 border border-indigo-400/40 text-indigo-200 px-2.5 py-0.5 rounded-full font-bold">
+                    Voyage Settlement Record
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 font-bold uppercase">
+                    {getRecordTerminal(selectedPayment) || 'Port Terminal'}
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/20 border border-blue-400/40 text-blue-200 font-bold uppercase">
+                    {selectedPayment.month}
+                  </span>
+                </div>
+                <h3 className="text-xl font-black font-mono tracking-tight flex items-center gap-2">
+                  <Landmark className="h-5 w-5 text-indigo-400" />
+                  {selectedPayment.controlNo}
+                </h3>
+                <p className="text-xs text-indigo-200/80 mt-0.5 font-sans font-medium">
+                  {selectedPayment.vesselName} • {selectedPayment.shippingAgency || 'No Shipping Agency'}
+                </p>
+              </div>
+              <button 
+                onClick={() => setSelectedPayment(null)}
+                className="text-white hover:bg-white/15 p-2 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Content Body */}
+            <div className="p-6 overflow-y-auto space-y-6">
+              {/* Summary Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="bg-blue-50/70 border border-blue-100 p-4 rounded-xl">
+                  <p className="text-[10px] font-mono uppercase text-blue-700 font-bold">Total Vessel Charges</p>
+                  <p className="text-xl font-black text-blue-950 mt-1 font-mono">{formatCurrency(selectedPayment.vesselTotal)}</p>
+                  <p className="text-[10px] text-blue-600/80 mt-0.5">Port dues, dockage, anchorage, pilotage</p>
+                </div>
+                <div className="bg-emerald-50/70 border border-emerald-100 p-4 rounded-xl">
+                  <p className="text-[10px] font-mono uppercase text-emerald-700 font-bold">Total Cargo Charges</p>
+                  <p className="text-xl font-black text-emerald-950 mt-1 font-mono">{formatCurrency(selectedPayment.cargoTotal)}</p>
+                  <p className="text-[10px] text-emerald-600/80 mt-0.5">Import & domestic wharfage + VAT</p>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl text-white">
+                  <p className="text-[10px] font-mono uppercase text-slate-400 font-bold">Total Actual Payment</p>
+                  <p className="text-xl font-black text-amber-400 mt-1 font-mono">{formatCurrency(selectedPayment.actualPayment || (selectedPayment.vesselTotal + selectedPayment.cargoTotal))}</p>
+                  <p className="text-[10px] text-slate-300 mt-0.5">Grand fee settlement total</p>
+                </div>
+              </div>
+
+              {/* Vessel Charges Breakdown */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <div className="bg-slate-100 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+                  <h5 className="text-xs font-bold font-mono uppercase text-slate-800 flex items-center gap-2">
+                    <Ship className="w-3.5 h-3.5 text-blue-600" />
+                    Vessel Tariffs & Regulatory Dues
+                  </h5>
+                  <span className="text-xs font-mono font-bold text-blue-700">{formatCurrency(selectedPayment.vesselTotal)}</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y divide-slate-100 text-xs">
+                  <div className="p-3">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block">Port Dues</span>
+                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.portDues)}</span>
+                  </div>
+                  <div className="p-3">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block">Dockage Fee</span>
+                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.dockage)}</span>
+                  </div>
+                  <div className="p-3">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block">Anchorage Fee</span>
+                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.anchorage)}</span>
+                  </div>
+                  <div className="p-3">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block">Pilotage Fee</span>
+                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.pilotage)}</span>
+                  </div>
+                  <div className="p-3">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block">Usage Fee</span>
+                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.usageFee)}</span>
+                  </div>
+                  <div className="p-3">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block">Service Fee</span>
+                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.serviceFee)}</span>
+                  </div>
+                  <div className="p-3">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block">VAT Vessel</span>
+                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.vatVessel)}</span>
+                  </div>
+                  <div className="p-3 bg-blue-50/40">
+                    <span className="text-[10px] font-mono text-blue-700 uppercase font-bold block">Vessel Subtotal</span>
+                    <span className="font-extrabold text-blue-900 font-mono mt-0.5 block">{formatCurrency(selectedPayment.vesselTotal)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Cargo Charges Breakdown */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <div className="bg-slate-100 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+                  <h5 className="text-xs font-bold font-mono uppercase text-slate-800 flex items-center gap-2">
+                    <Landmark className="w-3.5 h-3.5 text-emerald-600" />
+                    Cargo Wharfage & Consignee Charges
+                  </h5>
+                  <span className="text-xs font-mono font-bold text-emerald-700">{formatCurrency(selectedPayment.cargoTotal)}</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y divide-slate-100 text-xs">
+                  <div className="p-3">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block">Consignee</span>
+                    <span className="font-bold text-slate-800 mt-0.5 block truncate">{selectedPayment.consignee || '—'}</span>
+                  </div>
+                  <div className="p-3">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block">Import Wharfage</span>
+                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.importWharfage)}</span>
+                  </div>
+                  <div className="p-3">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block">Domestic Wharfage</span>
+                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.domesticWharfage)}</span>
+                  </div>
+                  <div className="p-3">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase block">VAT Cargo</span>
+                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.vatCargo)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+              <span className="text-xs font-mono text-slate-500">
+                Payment Control ID: <strong className="text-slate-800 font-bold">{selectedPayment.controlNo}</strong>
+              </span>
+              <button 
+                onClick={() => setSelectedPayment(null)}
+                className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors"
+              >
+                Done
               </button>
             </div>
           </div>

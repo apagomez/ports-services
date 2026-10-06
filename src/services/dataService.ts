@@ -435,6 +435,7 @@ export async function fetchPaymentData(): Promise<PaymentDashboardData> {
 
                 const vCtrlIdx = findVIdx(['CONTROL NO'], 2);
                 const vMonthIdx = findVIdx(['MONTH'], 3);
+                const vTerminalIdx = findVIdx(['TERMINAL', 'PORT TERMINAL'], 4);
                 const vVesselIdx = findVIdx(['VESSEL NAME', 'NAME OF VESSEL'], 5);
                 const vAgencyIdx = findVIdx(['SHIPPING AGENCY', 'SHIP AGENT', 'SHIPPING LINE'], 16);
                 
@@ -461,6 +462,7 @@ export async function fetchPaymentData(): Promise<PaymentDashboardData> {
 
                   const monthRaw = row[vMonthIdx]?.trim() || '';
                   const month = monthRaw ? normalizeMonth(monthRaw) : 'UNKNOWN';
+                  const terminal = row[vTerminalIdx]?.trim() || '';
                   const vesselName = row[vVesselIdx]?.trim() || 'UNKNOWN';
                   const shippingAgency = row[vAgencyIdx]?.trim() || '';
                   
@@ -484,6 +486,7 @@ export async function fetchPaymentData(): Promise<PaymentDashboardData> {
                   voyagePayments.push({
                     controlNo,
                     month,
+                    terminal,
                     vesselName,
                     shippingAgency,
                     portDues,

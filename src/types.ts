@@ -144,6 +144,7 @@ export interface VesselApplication {
 export interface VoyagePaymentRecord {
   controlNo: string;
   month: string;
+  terminal: string;
   vesselName: string;
   shippingAgency: string;
   portDues: number;
