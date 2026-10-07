@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
   LayoutGrid, 
   ListFilter, 
@@ -9,6 +9,7 @@ import {
   Ship, 
   Building2, 
   Check, 
+  ChevronLeft,
   ChevronRight,
   TrendingUp,
   Activity,
@@ -30,6 +31,7 @@ interface PortTerminalModulesProps {
   formatCurrencyShort: (val: number) => string;
   totalVesselCount?: number;
   totalRevenue?: number;
+  defaultViewMode?: ViewMode;
   className?: string;
 }
 
@@ -43,11 +45,20 @@ export const PortTerminalModules: React.FC<PortTerminalModulesProps> = ({
   formatCurrencyShort,
   totalVesselCount,
   totalRevenue,
+  defaultViewMode = 'strip',
   className
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('revenue');
-  const [viewMode, setViewMode] = useState<ViewMode>('grid'); // Default to grid for PC visibility!
+  const [viewMode, setViewMode] = useState<ViewMode>(defaultViewMode); // Default to strip as requested!
+  const stripScrollRef = useRef<HTMLDivElement>(null);
+
+  const handleScrollStrip = (direction: 'left' | 'right') => {
+    if (stripScrollRef.current) {
+      const offset = direction === 'left' ? -350 : 350;
+      stripScrollRef.current.scrollBy({ left: offset, behavior: 'smooth' });
+    }
+  };
 
   // Calculate totals if not explicitly passed
   const portTotals = useMemo(() => {
@@ -187,8 +198,19 @@ export const PortTerminalModules: React.FC<PortTerminalModulesProps> = ({
             </button>
           </div>
 
-          {/* View mode toggle (PC Grid vs Horizontal Strip) */}
+          {/* View mode toggle (Horizontal Strip as Default vs PC Grid) */}
           <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg p-0.5 text-[11px] font-mono">
+            <button
+              onClick={() => setViewMode('strip')}
+              className={cn(
+                "px-2 py-1 rounded font-bold uppercase transition-colors flex items-center gap-1 text-[10px]",
+                viewMode === 'strip' ? "bg-white text-indigo-900 shadow-2xs font-black" : "text-slate-600 hover:text-slate-900"
+              )}
+              title="Strip View: Compact horizontal carousel (Default)"
+            >
+              <Layers className="w-3 h-3" />
+              <span className="hidden sm:inline">Strip (Default)</span>
+            </button>
             <button
               onClick={() => setViewMode('grid')}
               className={cn(
@@ -199,17 +221,6 @@ export const PortTerminalModules: React.FC<PortTerminalModulesProps> = ({
             >
               <LayoutGrid className="w-3 h-3" />
               <span className="hidden sm:inline">Grid (All)</span>
-            </button>
-            <button
-              onClick={() => setViewMode('strip')}
-              className={cn(
-                "px-2 py-1 rounded font-bold uppercase transition-colors flex items-center gap-1 text-[10px]",
-                viewMode === 'strip' ? "bg-white text-indigo-900 shadow-2xs font-black" : "text-slate-600 hover:text-slate-900"
-              )}
-              title="Strip View: Compact horizontal carousel"
-            >
-              <Layers className="w-3 h-3" />
-              <span className="hidden sm:inline">Strip</span>
             </button>
           </div>
 
@@ -353,75 +364,99 @@ export const PortTerminalModules: React.FC<PortTerminalModulesProps> = ({
           })}
         </div>
       ) : (
-        /* ======================== STRIP / CAROUSEL VIEW ======================== */
-        <div className="flex items-stretch gap-2.5 overflow-x-auto pb-2 pt-1 no-scrollbar">
-          {/* Master "ALL TERMINALS" Hub Module Card in Strip */}
+        /* ======================== STRIP / CAROUSEL VIEW (DEFAULT) ======================== */
+        <div className="relative group/strip">
+          {/* Left / Right PC Navigation Scroll Buttons */}
           <button
-            onClick={() => onSelectTerminal('All')}
-            className={cn(
-              "px-4 py-2.5 rounded-xl border text-left transition-all duration-200 whitespace-nowrap cursor-pointer flex-shrink-0 flex items-center gap-3",
-              isAllSelected
-                ? "bg-slate-950 text-white border-slate-900 shadow-md ring-2 ring-emerald-400/50"
-                : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-800"
-            )}
+            type="button"
+            onClick={() => handleScrollStrip('left')}
+            className="hidden md:flex absolute -left-2 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white shadow-md border border-slate-200 text-slate-700 hover:text-indigo-600 hover:bg-slate-50 items-center justify-center transition-all opacity-80 hover:opacity-100 cursor-pointer"
+            title="Scroll terminals left"
           >
-            <div className={cn(
-              "w-2.5 h-2.5 rounded-full flex-shrink-0",
-              isAllSelected ? "bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]" : "bg-slate-400"
-            )} />
-            <div>
-              <div className="flex items-center gap-1.5">
-                <p className="text-[10px] font-mono font-black uppercase leading-none">ALL TERMINALS</p>
-                <span className={cn(
-                  "text-[7.5px] font-mono uppercase px-1 py-0.2 rounded font-bold",
-                  isAllSelected ? "bg-emerald-500/20 text-emerald-300" : "bg-slate-200 text-slate-600"
-                )}>
-                  HUB
-                </span>
-              </div>
-              <p className={cn("text-[9px] font-mono mt-1 font-bold", isAllSelected ? "text-emerald-300" : "text-slate-600")}>
-                {formatCurrencyShort(portTotals.revenue)} • {portTotals.calls} calls
-              </p>
-            </div>
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => handleScrollStrip('right')}
+            className="hidden md:flex absolute -right-2 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white shadow-md border border-slate-200 text-slate-700 hover:text-indigo-600 hover:bg-slate-50 items-center justify-center transition-all opacity-80 hover:opacity-100 cursor-pointer"
+            title="Scroll terminals right"
+          >
+            <ChevronRight className="w-4 h-4" />
           </button>
 
-          {/* Individual Terminal Cards in Strip */}
-          {filteredAndSortedTerminals.map((term) => {
-            const isSelected = selectedTerminal.toUpperCase() === term.name.toUpperCase();
-            return (
-              <button
-                key={term.name}
-                onClick={() => onSelectTerminal(isSelected ? 'All' : term.name)}
-                className={cn(
-                  "px-4 py-2.5 rounded-xl border text-left transition-all duration-200 whitespace-nowrap cursor-pointer flex-shrink-0 flex items-center gap-3 group",
-                  isSelected
-                    ? "bg-indigo-950 text-white border-indigo-700 shadow-md ring-2 ring-indigo-400/60"
-                    : "bg-white hover:bg-indigo-50/40 border-slate-200 hover:border-indigo-200 text-slate-800"
-                )}
-              >
-                <div className={cn(
-                  "w-2.5 h-2.5 rounded-full flex-shrink-0 transition-transform group-hover:scale-125",
-                  isSelected ? "bg-cyan-300 shadow-[0_0_6px_rgba(103,232,249,0.8)]" : "bg-indigo-400"
-                )} />
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <p className="text-[10px] font-mono font-black uppercase tracking-tight">{term.name}</p>
-                    {isSelected && (
-                      <span className="text-[7.5px] font-mono px-1 py-0.2 rounded bg-cyan-400/20 text-cyan-200 uppercase font-black">
-                        ACTIVE
-                      </span>
-                    )}
-                  </div>
-                  <p className={cn(
-                    "text-[9px] font-mono mt-1 font-bold",
-                    isSelected ? "text-cyan-300" : "text-indigo-600"
+          <div 
+            ref={stripScrollRef}
+            className="flex items-stretch gap-2.5 overflow-x-auto pb-2 pt-1 scroll-smooth"
+            style={{ scrollbarWidth: 'thin' }}
+          >
+            {/* Master "ALL TERMINALS" Hub Module Card in Strip */}
+            <button
+              onClick={() => onSelectTerminal('All')}
+              className={cn(
+                "px-4 py-2.5 rounded-xl border text-left transition-all duration-200 whitespace-nowrap cursor-pointer flex-shrink-0 flex items-center gap-3",
+                isAllSelected
+                  ? "bg-slate-950 text-white border-slate-900 shadow-md ring-2 ring-emerald-400/50"
+                  : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-800"
+              )}
+            >
+              <div className={cn(
+                "w-2.5 h-2.5 rounded-full flex-shrink-0",
+                isAllSelected ? "bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]" : "bg-slate-400"
+              )} />
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-[10px] font-mono font-black uppercase leading-none">ALL TERMINALS</p>
+                  <span className={cn(
+                    "text-[7.5px] font-mono uppercase px-1 py-0.2 rounded font-bold",
+                    isAllSelected ? "bg-emerald-500/20 text-emerald-300" : "bg-slate-200 text-slate-600"
                   )}>
-                    {formatCurrencyShort(term.revenue)} • {term.vesselCount} calls
-                  </p>
+                    HUB
+                  </span>
                 </div>
-              </button>
-            );
-          })}
+                <p className={cn("text-[9px] font-mono mt-1 font-bold", isAllSelected ? "text-emerald-300" : "text-slate-600")}>
+                  {formatCurrencyShort(portTotals.revenue)} • {portTotals.calls} calls
+                </p>
+              </div>
+            </button>
+
+            {/* Individual Terminal Cards in Strip */}
+            {filteredAndSortedTerminals.map((term) => {
+              const isSelected = selectedTerminal.toUpperCase() === term.name.toUpperCase();
+              return (
+                <button
+                  key={term.name}
+                  onClick={() => onSelectTerminal(isSelected ? 'All' : term.name)}
+                  className={cn(
+                    "px-4 py-2.5 rounded-xl border text-left transition-all duration-200 whitespace-nowrap cursor-pointer flex-shrink-0 flex items-center gap-3 group",
+                    isSelected
+                      ? "bg-indigo-950 text-white border-indigo-700 shadow-md ring-2 ring-indigo-400/60"
+                      : "bg-white hover:bg-indigo-50/40 border-slate-200 hover:border-indigo-200 text-slate-800"
+                  )}
+                >
+                  <div className={cn(
+                    "w-2.5 h-2.5 rounded-full flex-shrink-0 transition-transform group-hover:scale-125",
+                    isSelected ? "bg-cyan-300 shadow-[0_0_6px_rgba(103,232,249,0.8)]" : "bg-indigo-400"
+                  )} />
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-[10px] font-mono font-black uppercase tracking-tight">{term.name}</p>
+                      {isSelected && (
+                        <span className="text-[7.5px] font-mono px-1 py-0.2 rounded bg-cyan-400/20 text-cyan-200 uppercase font-black">
+                          ACTIVE
+                        </span>
+                      )}
+                    </div>
+                    <p className={cn(
+                      "text-[9px] font-mono mt-1 font-bold",
+                      isSelected ? "text-cyan-300" : "text-indigo-600"
+                    )}>
+                      {formatCurrencyShort(term.revenue)} • {term.vesselCount} calls
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 

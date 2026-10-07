@@ -8,6 +8,7 @@ import { PaymentDashboardData, VesselData, VoyagePaymentRecord } from '../types'
 import { Landmark, TrendingUp, Anchor, Ship, PlusCircle, Star, Search, X, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { PortTerminalModules } from './PortTerminalModules';
+import { VoyagePaymentLedger } from './VoyagePaymentLedger';
 
 interface PaymentDashboardProps {
   data: PaymentDashboardData;
@@ -572,6 +573,17 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
     });
   }, [data.voyagePayments, startMonth, endMonth, revenueFilter, terminalFilter, monthToIndex, vesselMap]);
 
+  // All Voyage Payment records within selected month range for the enhanced ledger
+  const periodVoyagePayments = useMemo(() => {
+    const startIndex = monthToIndex(startMonth);
+    const endIndex = monthToIndex(endMonth);
+
+    return (data.voyagePayments || []).filter(p => {
+      const idx = monthToIndex(p.month);
+      return idx >= startIndex && idx <= endIndex;
+    });
+  }, [data.voyagePayments, startMonth, endMonth, monthToIndex]);
+
   const monthsInSelection = useMemo(() => {
     const startIndex = monthToIndex(startMonth);
     const endIndex = monthToIndex(endMonth);
@@ -996,91 +1008,18 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
             </button>
           </div>
 
-          {/* Voyage Payment Transactions Ledger */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="p-5 border-b border-gray-100 bg-gray-50/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h4 className="text-sm font-bold uppercase tracking-wider text-gray-800 flex items-center gap-2">
-                    <Landmark className="w-4 h-4 text-fab-blue" />
-                    Voyage Payment Transactions Ledger
-                  </h4>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold">
-                    {filteredVoyagePayments.length} Records
-                  </span>
-                  {terminalFilter !== 'All' && (
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold">
-                      {terminalFilter}
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-slate-500 font-sans mt-0.5">
-                  Detailed settlement logs of vessel port dues, dockage, and cargo wharfage fees • Click any row to inspect full data
-                </p>
-              </div>
-              <div className="flex items-center gap-2 text-xs font-mono text-slate-500">
-                <span>Period: <strong className="text-slate-800">{startMonth.substring(0,3)} — {endMonth.substring(0,3)}</strong></span>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead className="bg-[#141414] text-white text-[9px] uppercase font-mono tracking-wider">
-                  <tr>
-                    <th className="p-3">Control No.</th>
-                    <th className="p-3">Port Terminal</th>
-                    <th className="p-3">Vessel Name</th>
-                    <th className="p-3">Shipping Line / Agency</th>
-                    <th className="p-3">Consignee</th>
-                    <th className="p-3 text-right">Vessel Charges</th>
-                    <th className="p-3 text-right">Cargo Charges</th>
-                    <th className="p-3 text-right">Actual Payment</th>
-                    <th className="p-3 text-center">Month</th>
-                    <th className="p-3 text-center">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 text-slate-700">
-                  {filteredVoyagePayments.length === 0 ? (
-                    <tr>
-                      <td colSpan={10} className="p-8 text-center text-slate-400 font-mono text-xs">
-                        No voyage payment transactions match the selected terminal ({terminalFilter}) and period ({startMonth} — {endMonth}).
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredVoyagePayments.map((p, idx) => {
-                      const recordTerm = getRecordTerminal(p) || '—';
-                      return (
-                        <tr 
-                          key={p.controlNo + '-' + idx} 
-                          onClick={() => setSelectedPayment(p)}
-                          className="hover:bg-indigo-50/75 transition-colors cursor-pointer group"
-                        >
-                          <td className="p-3 font-mono font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{p.controlNo}</td>
-                          <td className="p-3 font-mono font-bold text-indigo-700 uppercase">
-                            <span className="px-1.5 py-0.5 rounded bg-indigo-50 border border-indigo-100 text-[10px]">
-                              {recordTerm}
-                            </span>
-                          </td>
-                          <td className="p-3 font-semibold uppercase text-slate-900">{p.vesselName || 'UNKNOWN'}</td>
-                          <td className="p-3 text-slate-600 truncate max-w-[150px]">{p.shippingAgency || '—'}</td>
-                          <td className="p-3 text-slate-600 truncate max-w-[150px]">{p.consignee || '—'}</td>
-                          <td className="p-3 text-right font-mono font-semibold text-blue-600">{formatCurrency(p.vesselTotal)}</td>
-                          <td className="p-3 text-right font-mono font-semibold text-emerald-600">{formatCurrency(p.cargoTotal)}</td>
-                          <td className="p-3 text-right font-mono font-bold text-slate-900">{formatCurrency(p.actualPayment || (p.vesselTotal + p.cargoTotal))}</td>
-                          <td className="p-3 text-center font-mono text-[10px] uppercase text-slate-500">{p.month}</td>
-                          <td className="p-3 text-center">
-                            <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase font-bold text-indigo-600 group-hover:text-indigo-800 bg-indigo-50 group-hover:bg-indigo-100 px-2 py-1 rounded transition-colors">
-                              Inspect →
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          {/* Voyage Payment Transactions Ledger with Omni-Search & Multi-Filter */}
+          <VoyagePaymentLedger
+            payments={periodVoyagePayments}
+            startMonth={startMonth}
+            endMonth={endMonth}
+            globalTerminalFilter={terminalFilter}
+            globalRevenueFilter={revenueFilter}
+            uniqueTerminals={uniqueTerminals}
+            onSelectPayment={setSelectedPayment}
+            formatCurrency={formatCurrency}
+            getRecordTerminal={getRecordTerminal}
+          />
         </React.Fragment>
       )}
 
