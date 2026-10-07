@@ -37,6 +37,7 @@ const services = [
     id: 'vep',
     title: 'Vessel Entry Permit',
     description: 'Apply for entry permit for incoming vessels.',
+    subType: 'VEP',
     icon: Ship,
     color: 'text-blue-500',
     bg: 'bg-blue-50',
@@ -46,6 +47,7 @@ const services = [
     id: 'vc',
     title: 'Vessel Clearance',
     description: 'Process outbound clearance for departing vessels.',
+    subType: 'VEP',
     icon: CheckSquare,
     color: 'text-green-500',
     bg: 'bg-green-50',
@@ -55,6 +57,7 @@ const services = [
     id: 'pgp',
     title: 'Port Gate Pass',
     description: 'Request access gate pass for port facilities.',
+    subType: 'PGP',
     icon: FileText,
     color: 'text-orange-500',
     bg: 'bg-orange-50',
@@ -64,6 +67,7 @@ const services = [
     id: 'ancillary',
     title: 'Ancillary Services',
     description: 'Request for additional port services and assistance.',
+    subType: 'PAS',
     icon: LayoutGrid,
     color: 'text-purple-500',
     bg: 'bg-purple-50',
@@ -154,18 +158,16 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.1 }}
                       onClick={() => setActiveService(service.id)}
-                      className={`bg-white rounded-xl shadow-sm border ${service.border} p-6 hover:shadow-md transition-all cursor-pointer group`}
+                      className={`bg-white rounded-xl shadow-sm border ${service.border} p-6 hover:shadow-md transition-all cursor-pointer group flex flex-col justify-between`}
                     >
-                      <div className="flex items-start gap-4">
-                        <div className={`p-4 rounded-xl ${service.bg} group-hover:scale-110 transition-transform`}>
-                          <Icon className={`w-8 h-8 ${service.color}`} />
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-bold text-slate-900 group-hover:text-fab-blue transition-colors">{service.title}</h3>
-                          <p className="text-slate-600 mt-1 text-sm">{service.description}</p>
-                          <div className="mt-4 flex items-center gap-2 text-sm font-semibold text-fab-blue opacity-0 group-hover:opacity-100 transition-opacity">
-                            <span>Access Service</span>
-                            <span className="transition-transform group-hover:translate-x-1">→</span>
+                      <div>
+                        <div className="flex items-start gap-4">
+                          <div className={`p-4 rounded-xl ${service.bg} group-hover:scale-110 transition-transform`}>
+                            <Icon className={`w-8 h-8 ${service.color}`} />
+                          </div>
+                          <div>
+                            <h3 className="text-lg font-bold text-slate-900 group-hover:text-fab-blue transition-colors">{service.title}</h3>
+                            <p className="text-slate-600 mt-1 text-sm">{service.description}</p>
                           </div>
                         </div>
                       </div>

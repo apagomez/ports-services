@@ -129,7 +129,9 @@ export const CargoDashboard: React.FC<CargoDashboardProps> = ({ data }) => {
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <h2 className="text-xl font-bold font-mono uppercase tracking-tighter">Cargo Statistics Analysis</h2>
+        <div>
+          <h2 className="text-xl font-bold font-mono uppercase tracking-tighter">Cargo Statistics Analysis</h2>
+        </div>
         <div className="flex flex-wrap items-center gap-3">
           {/* Period Filter */}
           <div className="flex items-center bg-white border border-[#141414] rounded-sm p-1 gap-1 shadow-sm">

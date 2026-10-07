@@ -2,6 +2,7 @@
 import React, { useMemo, useState } from 'react';
 import { VesselData } from '../types';
 import { formatSystemDate } from '../utils/dateFormatter';
+import { normalizeTerminal } from '../utils/terminalNormalizer';
 import { 
   Ship, 
   Globe, 
@@ -111,12 +112,15 @@ export const StatisticsDashboard: React.FC<StatisticsDashboardProps> = ({ data, 
   const terminalStats = useMemo(() => {
     const groups: Record<string, { calls: number, gt: number, cargo: number }> = {};
     filteredData.forEach(v => {
-      if (!groups[v.terminal]) groups[v.terminal] = { calls: 0, gt: 0, cargo: 0 };
-      groups[v.terminal].calls += 1;
-      groups[v.terminal].gt += (v.gt || 0);
-      groups[v.terminal].cargo += (v.cargoVolumeMT || 0);
+      const term = normalizeTerminal(v.terminal);
+      if (!term) return;
+      if (!groups[term]) groups[term] = { calls: 0, gt: 0, cargo: 0 };
+      groups[term].calls += 1;
+      groups[term].gt += (v.gt || 0);
+      groups[term].cargo += (v.cargoVolumeMT || 0);
     });
     return Object.entries(groups)
+      .filter(([_, stats]) => stats.calls > 0)
       .map(([name, stats]) => ({ name, ...stats }))
       .sort((a, b) => b.calls - a.calls);
   }, [filteredData]);
@@ -1159,7 +1163,7 @@ export const StatisticsDashboard: React.FC<StatisticsDashboardProps> = ({ data, 
                            <td className="p-4 font-mono border-r border-slate-100 text-slate-400">{v.controlNo}</td>
                            <td className="p-4 font-bold border-r border-slate-100 text-fab-blue">{v.vesselName}</td>
                            <td className="p-4 border-r border-slate-100 text-slate-600 font-medium">{v.vesselType}</td>
-                           <td className="p-4 border-r border-slate-100 text-slate-500 italic">{v.terminal}</td>
+                           <td className="p-4 border-r border-slate-100 text-slate-500 italic">{normalizeTerminal(v.terminal) || "ANCHORAGE"}</td>
                            <td className="p-4 border-r border-slate-100 text-right font-mono text-slate-600">{v.cargoVolumeMT ? Math.round(v.cargoVolumeMT).toLocaleString() : '-'}</td>
                            <td className="p-4 border-r border-slate-100">
                              <span className={cn(

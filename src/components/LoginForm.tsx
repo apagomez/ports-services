@@ -77,7 +77,16 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
         className="mt-8 sm:mx-auto sm:w-full sm:max-w-md"
       >
         <div className="bg-white py-8 px-4 shadow sm:rounded-lg sm:px-10 border border-slate-200">
-          <form className="space-y-6" onSubmit={handleSubmit}>
+          <form 
+            className="space-y-6" 
+            onSubmit={handleSubmit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleSubmit(e as any);
+              }
+            }}
+          >
             {error && (
               <div className="bg-red-50 border-l-4 border-red-400 p-4">
                 <div className="flex">
@@ -103,6 +112,12 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
                   required
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSubmit(e as any);
+                    }
+                  }}
                   className="focus:ring-fab-blue focus:border-fab-blue block w-full pl-10 sm:text-sm border-slate-300 rounded-md py-2 border"
                   placeholder="admin or user"
                 />
@@ -124,6 +139,12 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSubmit(e as any);
+                    }
+                  }}
                   className="focus:ring-fab-blue focus:border-fab-blue block w-full pl-10 sm:text-sm border-slate-300 rounded-md py-2 border"
                   placeholder="Password"
                 />
@@ -132,6 +153,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
 
             <div>
               <button
+                id="sign-in-btn"
                 type="submit"
                 className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-fab-blue hover:bg-blue-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-fab-blue transition-colors cursor-pointer"
               >
@@ -152,6 +174,12 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
               <button
                 type="button"
                 onClick={handleGoogleLogin}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    // Prevent accidental triggering if user intended to submit form
+                    e.stopPropagation();
+                  }
+                }}
                 disabled={isSigningInWithGoogle}
                 className="w-full flex items-center justify-center gap-3 py-2.5 px-4 border border-slate-200 rounded-md shadow-sm text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-fab-blue transition-all cursor-pointer hover:border-slate-300 disabled:opacity-50"
               >

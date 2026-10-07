@@ -57,6 +57,7 @@ import { UserDashboard } from './components/UserDashboard';
 import { ApplicationDashboard } from './components/ApplicationDashboard';
 import { formatSystemDate } from './utils/dateFormatter';
 import { safeStorage } from './utils/safeStorage';
+import { normalizeTerminal, matchesTerminalFilter, FAB_PORT_TERMINALS } from './utils/terminalNormalizer';
 import { initAuth, logout as googleLogout, googleSignIn, getAccessToken, appendApplicationToSheet, deleteApplicationFromSheet } from './services/googleSheetsService';
 
 // Official Freeport Area of Bataan (FAB) & Port Regulations navigation/regulatory signaling colors:
@@ -304,7 +305,7 @@ export default function App() {
           controlNo: app.id || '',
           aveNumber: (app.id || '').match(/-(\d{3})-?/)?.[1] || '000',
           month: app.createdAt ? new Date(app.createdAt).toLocaleString('default', { month: 'long' }).toUpperCase() : 'UNKNOWN',
-          terminal: app.terminal || 'UNKNOWN',
+          terminal: normalizeTerminal(app.terminal) || 'ANCHORAGE',
           voyageType: app.voyageType || 'DOMESTIC',
           vesselName: app.vesselName || 'UNNAMED VESSEL',
           voyageNo: app.voyageNo || 'N/A',
@@ -368,7 +369,7 @@ export default function App() {
       const matchesName = v.vesselName.toLowerCase().includes(colFilters.name.toLowerCase());
       const matchesOrientation = colFilters.orientation === 'All' || v.orientation === colFilters.orientation;
       const matchesColType = colFilters.type === 'All' || v.vesselType === colFilters.type;
-      const matchesTerminal = colFilters.terminal === 'All' || v.terminal === colFilters.terminal;
+      const matchesTerminal = matchesTerminalFilter(v.terminal, colFilters.terminal);
       const matchesLoadVolume = !colFilters.loadVolume || 
         (v.cargoVolumeMT != null && String(Math.round(v.cargoVolumeMT)).includes(colFilters.loadVolume)) ||
         (v.cargoVolumeCBM != null && String(Math.round(v.cargoVolumeCBM)).includes(colFilters.loadVolume));
@@ -467,7 +468,14 @@ export default function App() {
   const uniqueVoyages = useMemo(() => Array.from(new Set(allVessels.map(v => v.voyageType))).sort(), [allVessels]);
 
   const uniqueTypes = useMemo(() => Array.from(new Set(allVessels.map(v => v.vesselType))).sort(), [allVessels]);
-  const uniqueTerminals = useMemo(() => Array.from(new Set(allVessels.map(v => v.terminal))).sort(), [allVessels]);
+  const uniqueTerminals = useMemo(() => {
+    const set = new Set<string>();
+    allVessels.forEach(v => {
+      const norm = normalizeTerminal(v.terminal);
+      if (norm) set.add(norm);
+    });
+    return Array.from(set).sort();
+  }, [allVessels]);
   const uniqueOrigins = useMemo(() => Array.from(new Set(allVessels.map(v => v.origin))).sort(), [allVessels]);
   const uniqueStatuses = useMemo(() => Array.from(new Set(allVessels.map(v => v.status))).sort(), [allVessels]);
 
@@ -484,6 +492,23 @@ export default function App() {
       .sort((a, b) => (b.value as number) - (a.value as number))
       .slice(0, 5);
   }, [stats]);
+
+  const sharedFormOptions = useMemo(() => {
+    const rawUsed = [
+      ...allVessels.map(d => (d.controlNo || '').trim().replace(/-(F|D|P)$/i, '')),
+      ...(paymentData?.ancillaryRecords || []).map(r => (r.controlNo || '').trim()),
+      ...(paymentData?.pgpControlNumbers || []).map(c => (c || '').trim()),
+      ...applications.map(a => (a.id || '').trim().replace(/-(F|D|P)$/i, ''))
+    ];
+    const cleanUsed = Array.from(new Set(rawUsed.filter(n => typeof n === 'string' && n.trim().length > 0)));
+    return {
+      voyages: uniqueVoyages,
+      types: uniqueTypes,
+      terminals: uniqueTerminals,
+      origins: uniqueOrigins,
+      usedControlNumbers: cleanUsed
+    };
+  }, [allVessels, paymentData, applications, uniqueVoyages, uniqueTypes, uniqueTerminals, uniqueOrigins]);
 
   if (authRole === null) {
     return <LoginForm onLogin={(role, email) => {
@@ -579,18 +604,7 @@ export default function App() {
           safeAlert(`Failed to delete application: ${err.message}`);
         }
       }}
-      options={{ 
-        voyages: uniqueVoyages, 
-        types: uniqueTypes, 
-        terminals: uniqueTerminals,
-        origins: uniqueOrigins,
-        usedControlNumbers: [
-          ...data.map(d => (d.controlNo || '').replace(/-(F|D|P)$/i, '')),
-          ...(paymentData?.ancillaryRecords || []).map(r => (r.controlNo || '')),
-          ...(paymentData?.pgpControlNumbers || []),
-          ...applications.map(a => (a.id || '').replace(/-(F|D|P)$/i, ''))
-        ]
-      }} 
+      options={sharedFormOptions} 
     />;
   }
 
@@ -1093,18 +1107,7 @@ export default function App() {
                     safeAlert(`Failed to delete application: ${err.message}`);
                   }
                 }}
-                options={{ 
-                  voyages: uniqueVoyages, 
-                  types: uniqueTypes, 
-                  terminals: uniqueTerminals,
-                  origins: uniqueOrigins,
-                  usedControlNumbers: [
-                    ...allVessels.map(d => (d.controlNo || '').replace(/-(F|D|P)$/i, '')),
-                    ...(paymentData?.ancillaryRecords || []).map(r => (r.controlNo || '')),
-                    ...(paymentData?.pgpControlNumbers || []),
-                    ...applications.map(a => (a.id || '').replace(/-(F|D|P)$/i, ''))
-                  ]
-                }}
+                options={sharedFormOptions}
               />
             </motion.div>
           ) : activeTab === 'payments' ? (

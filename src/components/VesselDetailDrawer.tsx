@@ -47,6 +47,31 @@ export function VesselDetailDrawer({
                 </button>
               </div>
 
+              {/* Vessel Identifiers */}
+              <div className="mb-8 p-3 rounded-lg bg-white border border-[#141414] shadow-[3px_3px_0px_0px_#141414] flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-blue-50 text-fab-blue rounded border border-blue-200">
+                    <Ship className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-[9px] uppercase font-mono font-black text-slate-400 block tracking-wider">
+                      Vessel Entry Record
+                    </span>
+                    <span className="font-extrabold text-[#141414] text-xs">
+                      {selectedVessel.vesselName}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-mono text-[9.5px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded font-bold border border-emerald-200">
+                    Control: {selectedVessel.controlNo}
+                  </span>
+                  <span className="font-mono text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold">
+                    AVE #{selectedVessel.aveNumber || '000'}
+                  </span>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-8 mb-12">
                 <DetailItem label="Vessel Type" value={selectedVessel.vesselType} icon={Ship} />
                 <DetailItem label="Status" value={selectedVessel.status} icon={Anchor} />

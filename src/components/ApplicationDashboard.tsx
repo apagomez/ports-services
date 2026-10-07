@@ -14,7 +14,9 @@ import {
   ShieldCheck,
   UserCheck,
   FileSpreadsheet,
-  Settings
+  Settings,
+  Radio,
+  ExternalLink
 } from 'lucide-react';
 import { VesselApplication } from '../types';
 import { cn } from '../lib/utils';
@@ -506,9 +508,9 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                 setSelectedType('VEP');
               }}
               className={cn(
-                "p-4 rounded-xl border text-left transition-all relative overflow-hidden cursor-pointer",
+                "p-4 rounded-xl border text-left transition-all relative overflow-hidden cursor-pointer group",
                 selectedType === 'VEP'
-                  ? "bg-gradient-to-br from-slate-900 to-slate-800 text-white border-slate-900 shadow-md"
+                  ? "bg-gradient-to-br from-slate-900 to-slate-800 text-white border-slate-900 shadow-md ring-2 ring-fab-red/50"
                   : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:shadow-sm"
               )}
             >
@@ -528,6 +530,7 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                   <FileText className="w-5 h-5" />
                 </div>
               </div>
+
               <div className="mt-4 flex items-baseline gap-2">
                 <span className={cn("text-2xl font-black", selectedType === 'VEP' ? "text-white" : "text-slate-900")}>
                   {vepApps.length}
@@ -546,9 +549,9 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                 setSelectedType('PAS');
               }}
               className={cn(
-                "p-4 rounded-xl border text-left transition-all relative overflow-hidden cursor-pointer",
+                "p-4 rounded-xl border text-left transition-all relative overflow-hidden cursor-pointer group",
                 selectedType === 'PAS'
-                  ? "bg-gradient-to-br from-slate-900 to-slate-800 text-white border-slate-900 shadow-md"
+                  ? "bg-gradient-to-br from-slate-900 to-slate-800 text-white border-slate-900 shadow-md ring-2 ring-fab-red/50"
                   : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:shadow-sm"
               )}
             >
@@ -568,6 +571,7 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                   <FileSpreadsheet className="w-5 h-5" />
                 </div>
               </div>
+
               <div className="mt-4 flex items-baseline gap-2">
                 <span className={cn("text-2xl font-black", selectedType === 'PAS' ? "text-white" : "text-slate-900")}>
                   {pasApps.length}
@@ -586,9 +590,9 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                 setSelectedType('PGP');
               }}
               className={cn(
-                "p-4 rounded-xl border text-left transition-all relative overflow-hidden cursor-pointer",
+                "p-4 rounded-xl border text-left transition-all relative overflow-hidden cursor-pointer group",
                 selectedType === 'PGP'
-                  ? "bg-gradient-to-br from-slate-900 to-slate-800 text-white border-slate-900 shadow-md"
+                  ? "bg-gradient-to-br from-slate-900 to-slate-800 text-white border-slate-900 shadow-md ring-2 ring-fab-red/50"
                   : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:shadow-sm"
               )}
             >
@@ -608,6 +612,7 @@ export const ApplicationDashboard: React.FC<ApplicationDashboardProps> = ({
                   <FileText className="w-5 h-5 text-orange-500" />
                 </div>
               </div>
+
               <div className="mt-4 flex items-baseline gap-2">
                 <span className={cn("text-2xl font-black", selectedType === 'PGP' ? "text-white" : "text-slate-900")}>
                   {pgpApps.length}

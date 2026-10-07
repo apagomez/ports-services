@@ -8,6 +8,8 @@ import fabLogo from "../assets/images/fab-logo.png";
 import { getAccessToken } from "../services/googleSheetsService";
 import { formatSystemDate } from "../utils/dateFormatter";
 import { oklchToRgb } from "../utils/colorConverter";
+import { normalizeTerminal, FAB_PORT_TERMINALS } from "../utils/terminalNormalizer";
+import vesselsCsvFallback from "../../public/vessels_mock.csv?raw";
 
 interface VesselEntryFormProps {
   onBack: () => void;
@@ -180,6 +182,14 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
     return false;
   }, [formData.arrivalDate, formData.departureDate]);
 
+  const terminalOptions = React.useMemo(() => {
+    const list = (options?.terminals || []).map(normalizeTerminal).filter(Boolean);
+    if (list.length > 0) {
+      return Array.from(new Set(list)).sort();
+    }
+    return [...FAB_PORT_TERMINALS];
+  }, [options?.terminals]);
+
   const [isDrawing, setIsDrawing] = useState(false);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
 
@@ -314,10 +324,17 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
   const usedControlNumbersStr = options?.usedControlNumbers?.join(",") || "";
 
   useEffect(() => {
-    if (!initialData?.id) {
-      setIsLoadingControlNum(true);
+    if (initialData?.id) {
+      setControlNumber(initialData.id);
+      setIsLoadingControlNum(false);
+      return;
+    }
 
-      const fetchAndSetControlNumber = async () => {
+    setIsLoadingControlNum(true);
+    let isMounted = true;
+
+    const fetchAndSetControlNumber = async () => {
+      try {
         let csvText = "";
         let isMock = false;
         let rows: string[][] = [];
@@ -329,13 +346,9 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
           const spreadId = getVesselMasterSpreadsheetId();
 
           if (token) {
-            // Try using Google Sheets API first for the most accurate and fresh live data
             try {
-              // 1. Fetch metadata to get the actual sheet name for GID 960645385
               const metaResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadId}?fields=sheets.properties(title,sheetId)`, {
-                headers: {
-                  'Authorization': `Bearer ${token}`
-                }
+                headers: { 'Authorization': `Bearer ${token}` }
               });
               if (metaResponse.ok) {
                 const metaData = await metaResponse.json();
@@ -343,14 +356,9 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
                 const foundSheet = sheetsList.find((s: any) => Number(s.properties?.sheetId) === 960645385);
                 const targetSheetName = foundSheet?.properties?.title || sheetsList[0]?.properties?.title || 'Sheet1';
 
-                // 2. Fetch column values (A:F) from that specific sheet
                 const res = await fetch(
                   `https://sheets.googleapis.com/v4/spreadsheets/${spreadId}/values/'${encodeURIComponent(targetSheetName)}'!A:F`,
-                  {
-                    headers: {
-                      'Authorization': `Bearer ${token}`
-                    }
-                  }
+                  { headers: { 'Authorization': `Bearer ${token}` } }
                 );
                 if (res.ok) {
                   const data = await res.json();
@@ -358,7 +366,6 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
                     rows = data.values;
                     fetchedSuccessfully = true;
                     isMock = false;
-                    console.log("[VesselEntryForm] Successfully fetched latest VEP control numbers via Google Sheets API. Count:", rows.length);
                   }
                 }
               }
@@ -368,185 +375,127 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
           }
 
           if (!fetchedSuccessfully) {
-            const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadId}/export?format=csv&gid=960645385&t=${Date.now()}`;
-            const headers: HeadersInit = {};
-            if (token) {
-              headers['Authorization'] = `Bearer ${token}`;
-            }
-            const res = await fetch(sheetUrl, { headers, cache: "no-store" });
-
-            if (res.redirected && res.url.includes("ServiceLogin")) {
-              console.warn(
-                "Google Sheets redirected to login. Using fallback CSV.",
-              );
-              const fallbackRes = await fetch(
-                `/vessels_mock.csv?t=${Date.now()}`,
-              );
-              csvText = await fallbackRes.text();
-              isMock = true;
-            } else if (!res.ok) {
-              console.warn("Google Sheets fetch failed. Using fallback CSV.");
-              const fallbackRes = await fetch(
-                `/vessels_mock.csv?t=${Date.now()}`,
-              );
-              csvText = await fallbackRes.text();
-              isMock = true;
-            } else {
-              csvText = await res.text();
-              isMock = false;
+            try {
+              const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadId}/export?format=csv&gid=960645385&t=${Date.now()}`;
+              const headers: HeadersInit = {};
+              if (token) headers['Authorization'] = `Bearer ${token}`;
+              const res = await fetch(sheetUrl, { headers, cache: "no-store" });
+              if (res.ok && !res.redirected) {
+                csvText = await res.text();
+                isMock = false;
+              }
+            } catch {
+              // Network/CORS export fallback
             }
           }
         } catch (err) {
-          console.warn(
-            "Network error fetching Google Sheets directly, falling back to local CSV:",
-            err,
-          );
-          try {
-            const fallbackRes = await fetch(
-              `/vessels_mock.csv?t=${Date.now()}`,
-            );
-            csvText = await fallbackRes.text();
-            isMock = true;
-          } catch (e) {
-            console.error("Could not fetch fallback mock CSV:", e);
-          }
+          console.warn("[VesselEntryForm] Sheets fetch error, using local fallback:", err);
         }
 
-        // Parse fallback CSV if we don't have row data yet
+        // Fast fallback to bundled static CSV if sheet not fetched
+        if (!fetchedSuccessfully && (!csvText || csvText.length === 0)) {
+          csvText = vesselsCsvFallback || '';
+          isMock = true;
+        }
+
         if (!fetchedSuccessfully && csvText) {
           await new Promise<void>((resolve) => {
             Papa.parse(csvText, {
               header: false,
               complete: (result) => {
-                rows = result.data as string[][];
+                rows = (result.data || []) as string[][];
                 fetchedSuccessfully = true;
                 resolve();
               },
-              error: (err) => {
-                console.error("Papa parse error in fetchAndSetControlNumber fallback:", err);
-                resolve();
-              }
+              error: () => resolve()
             });
           });
         }
 
-        if (!fetchedSuccessfully || !rows || rows.length === 0) {
-          setControlNumber("PSD-26-001");
-          setIsLoadingControlNum(false);
-          return;
-        }
+        if (!isMounted) return;
 
-        let found = false;
+        let maxSeqNum = 0;
+        let yearPrefix = new Date().getFullYear().toString().slice(-2) || "26";
+        let hasAnyPsd = false;
+        const usedBasesSet = new Set<string>();
 
-        // 1. Try to find a pre-allocated empty control number row in the sheet
-        // ONLY if this is the live sheet!
-        if (!isMock) {
-          for (let i = 0; i < rows.length; i++) {
-            const row = rows[i];
-            if (row && row[0]) {
-              const ctrl = row[0].trim().toUpperCase();
-              if (
-                ctrl.startsWith("PSD-") &&
-                (!row[5] || row[5].trim() === "")
-              ) {
-                const baseMatch = ctrl.match(/^(PSD-\d{2}-\d{3,4})/);
-                const parsedControlNo = baseMatch ? baseMatch[1] : ctrl;
-
-                if (
-                  !options?.usedControlNumbers?.includes(parsedControlNo)
-                ) {
-                  setControlNumber(parsedControlNo);
-                  found = true;
-                  break;
-                }
-              }
-            }
-          }
-        }
-
-        // 2. If no blank entries exist, generate the next sequential code below the last control number
-        if (!found) {
-          let maxSeqNum = 0;
-          let yearPrefix = "26";
-          let hasAnyPsd = false;
-
-          // Parse rows
-          for (let i = 0; i < rows.length; i++) {
-            const row = rows[i];
-            if (row && row[0]) {
-              const ctrl = row[0].trim().toUpperCase();
-              if (ctrl.startsWith("PSD-")) {
-                // If we are looking at the mock CSV, we ONLY count the row if it's filled (row[5] is not empty).
-                // This avoids the stale pre-allocated placeholders that got added to the mock CSV.
-                if (isMock && (!row[5] || row[5].trim() === "")) {
-                  continue;
-                }
-                hasAnyPsd = true;
-                const match = ctrl.match(/PSD-(\d{2})-(\d+)/i);
-                if (match) {
-                  const yr = match[1];
-                  const seq = parseInt(match[2], 10);
-                  if (!isNaN(seq)) {
-                    if (seq > maxSeqNum) {
-                      maxSeqNum = seq;
-                      yearPrefix = yr;
-                    }
+        // 1. Scan rows
+        (rows || []).forEach((row) => {
+          if (row && row[0]) {
+            const ctrl = row[0].trim().toUpperCase();
+            if (ctrl.startsWith("PSD-")) {
+              if (isMock && (!row[5] || row[5].trim() === "")) return;
+              hasAnyPsd = true;
+              const match = ctrl.match(/^PSD-(\d{2})-(\d+)/i);
+              if (match) {
+                const yr = match[1];
+                const seq = parseInt(match[2], 10);
+                if (!isNaN(seq)) {
+                  usedBasesSet.add(`PSD-${yr}-${String(seq).padStart(3, '0')}`);
+                  if (seq > maxSeqNum) {
+                    maxSeqNum = seq;
+                    yearPrefix = yr;
                   }
                 }
               }
             }
           }
+        });
 
-          // Also check control numbers in options?.usedControlNumbers!
-          if (options?.usedControlNumbers) {
-            options.usedControlNumbers.forEach((ctrlNum) => {
-              const ctrl = ctrlNum.trim().toUpperCase();
-              if (ctrl.startsWith("PSD-")) {
-                hasAnyPsd = true;
-                const match = ctrl.match(/PSD-(\d{2})-(\d+)/i);
-                if (match) {
-                  const yr = match[1];
-                  const seq = parseInt(match[2], 10);
-                  if (!isNaN(seq)) {
-                    if (seq > maxSeqNum) {
-                      maxSeqNum = seq;
-                      yearPrefix = yr;
-                    }
+        // 2. Scan options?.usedControlNumbers safely
+        if (options?.usedControlNumbers) {
+          options.usedControlNumbers.forEach((ctrlNum) => {
+            if (!ctrlNum || typeof ctrlNum !== 'string') return;
+            const ctrl = ctrlNum.trim().toUpperCase();
+            if (ctrl.startsWith("PSD-")) {
+              hasAnyPsd = true;
+              const match = ctrl.match(/^PSD-(\d{2})-(\d+)/i);
+              if (match) {
+                const yr = match[1];
+                const seq = parseInt(match[2], 10);
+                if (!isNaN(seq)) {
+                  usedBasesSet.add(`PSD-${yr}-${String(seq).padStart(3, '0')}`);
+                  if (seq > maxSeqNum) {
+                    maxSeqNum = seq;
+                    yearPrefix = yr;
                   }
                 }
               }
-            });
-          }
-
-          let nextSeqNum = hasAnyPsd ? maxSeqNum + 1 : 1;
-          while (true) {
-            const paddedSeq = String(nextSeqNum).padStart(3, "0");
-            const candidateBase = `PSD-${yearPrefix}-${paddedSeq}`;
-
-            const isUsed = options?.usedControlNumbers?.some((num) => {
-              const cleanNum = (num || "").trim().toUpperCase();
-              return (
-                cleanNum === candidateBase ||
-                cleanNum.startsWith(candidateBase) ||
-                candidateBase.startsWith(cleanNum)
-              );
-            });
-
-            if (!isUsed) {
-              break;
             }
-            nextSeqNum++;
-          }
+          });
+        }
 
-          const finalPaddedSeq = String(nextSeqNum).padStart(3, "0");
-          const finalControlNo = `PSD-${yearPrefix}-${finalPaddedSeq}`;
+        // 3. Find next available sequence number safely (strictly bounded)
+        let nextSeqNum = hasAnyPsd ? maxSeqNum + 1 : 1;
+        for (let step = 0; step < 500; step++) {
+          const candidateBase = `PSD-${yearPrefix}-${String(nextSeqNum).padStart(3, '0')}`;
+          if (!usedBasesSet.has(candidateBase)) {
+            break;
+          }
+          nextSeqNum++;
+        }
+
+        const finalControlNo = `PSD-${yearPrefix}-${String(nextSeqNum).padStart(3, '0')}`;
+        if (isMounted) {
           setControlNumber(finalControlNo);
         }
-        setIsLoadingControlNum(false);
-      };
+      } catch (e) {
+        console.error("[VesselEntryForm] Error generating control number:", e);
+        if (isMounted) {
+          setControlNumber("PSD-26-001");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingControlNum(false);
+        }
+      }
+    };
 
-      fetchAndSetControlNumber();
-    }
+    fetchAndSetControlNumber();
+
+    return () => {
+      isMounted = false;
+    };
   }, [initialData?.id, usedControlNumbersStr]);
 
   // Synchronize suffix when Voyage Type, Vessel Type, or Purpose of Call changes
@@ -1342,14 +1291,18 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
                       {fullControlNumber}
                     </span>
                   )
-                ) : fullControlNumber ? (
+                ) : (fullControlNumber || controlNumber) ? (
                   <span
-                    className="font-mono font-bold text-sm text-slate-755 bg-slate-100 border border-slate-250 px-2.5 py-0.5 rounded select-all cursor-default"
+                    className="font-mono font-bold text-sm text-slate-800 bg-slate-100 border border-slate-300 px-2.5 py-0.5 rounded select-all cursor-default"
                     title="Control Number is automatically generated."
                   >
-                    {fullControlNumber}
+                    {fullControlNumber || controlNumber}
                   </span>
-                ) : null}
+                ) : (
+                  <span className="font-mono font-bold text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                    PSD-26-PENDING
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-bold whitespace-nowrap">
@@ -1641,7 +1594,7 @@ export const VesselEntryForm: React.FC<VesselEntryFormProps> = ({
               required
             >
               <option value="">-Select-</option>
-              {options?.terminals.map((t) => (
+              {terminalOptions.map((t) => (
                 <option key={t} value={t}>
                   {t}
                 </option>

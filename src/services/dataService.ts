@@ -1,5 +1,6 @@
 import Papa from 'papaparse';
 import { VesselData, PaymentDashboardData, MonthlyRevenue, FeeBreakdown, AncillaryRecord, VoyagePaymentRecord } from '../types';
+import { normalizeTerminal } from '../utils/terminalNormalizer';
 import { 
   getAccessToken, 
   googleSignIn,
@@ -120,7 +121,7 @@ export async function fetchVesselData(): Promise<VesselData[]> {
               controlNo: row[0],
               aveNumber: row[1],
               month: row[2],
-              terminal: row[3],
+              terminal: normalizeTerminal(row[3]) || 'ANCHORAGE',
               voyageType: row[4],
               vesselName: row[5] || 'UNNAMED VESSEL',
               voyageNo: row[6],
@@ -398,7 +399,7 @@ export async function fetchPaymentData(): Promise<PaymentDashboardData> {
                   ancillaryRecords.push({
                     controlNo: ctrlVal.trim(),
                     provider: row[providerIdx]?.trim() || 'Individual/Other',
-                    terminal: row[terminalIdx]?.trim() || 'Unknown',
+                    terminal: normalizeTerminal(row[terminalIdx]) || 'ANCHORAGE',
                     serviceType: row[serviceIdx]?.trim() || 'Other',
                     vesselName: row[vesselIdx]?.trim() || 'UNKNOWN',
                     voyageNo: row[voyageNoIdx]?.trim() || '',
@@ -462,7 +463,7 @@ export async function fetchPaymentData(): Promise<PaymentDashboardData> {
 
                   const monthRaw = row[vMonthIdx]?.trim() || '';
                   const month = monthRaw ? normalizeMonth(monthRaw) : 'UNKNOWN';
-                  const terminal = row[vTerminalIdx]?.trim() || '';
+                  const terminal = normalizeTerminal(row[vTerminalIdx]) || '';
                   const vesselName = row[vVesselIdx]?.trim() || 'UNKNOWN';
                   const shippingAgency = row[vAgencyIdx]?.trim() || '';
                   

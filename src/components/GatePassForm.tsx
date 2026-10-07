@@ -6,6 +6,7 @@ import Papa from 'papaparse';
 import { VesselApplication, CargoRow } from '../types';
 import { formatSystemDate, formatSystemTime } from '../utils/dateFormatter';
 import { oklchToRgb } from '../utils/colorConverter';
+import { normalizeTerminal, FAB_PORT_TERMINALS } from '../utils/terminalNormalizer';
 import fabLogo from '../assets/images/fab-logo.png';
 
 interface GatePassFormProps {
@@ -80,6 +81,14 @@ export const GatePassForm: React.FC<GatePassFormProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [containerWidth, setContainerWidth] = useState<number>(794);
+
+  const terminalOptions = React.useMemo(() => {
+    const list = (options?.terminals || []).map(normalizeTerminal).filter(Boolean);
+    if (list.length > 0) {
+      return Array.from(new Set(list)).sort();
+    }
+    return [...FAB_PORT_TERMINALS];
+  }, [options?.terminals]);
 
   useEffect(() => {
     if (!previewParentRef.current) return;
@@ -692,7 +701,7 @@ export const GatePassForm: React.FC<GatePassFormProps> = ({
                 required
               >
                 <option value="">-- CHOOSE TERMINAL --</option>
-                {(options?.terminals || []).map((term) => (
+                {terminalOptions.map((term) => (
                   <option key={term} value={term}>{term}</option>
                 ))}
               </select>

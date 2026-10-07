@@ -4,6 +4,7 @@ import { VesselData } from '../types';
 import { cn } from '../lib/utils';
 import { detectVesselAnomalies } from '../utils/anomalyDetector';
 import { formatSystemDate } from '../utils/dateFormatter';
+import { normalizeTerminal } from '../utils/terminalNormalizer';
 
 export function VesselTable({
   paginatedData,
@@ -170,7 +171,7 @@ export function VesselTable({
                       {v.orientation}
                     </span>
                   </td>
-                  <td className="p-4 border-r border-slate-100 text-[#141414] font-medium text-right">{v.terminal}</td>
+                  <td className="p-4 border-r border-slate-100 text-[#141414] font-medium text-right">{normalizeTerminal(v.terminal) || 'ANCHORAGE'}</td>
                   <td className="p-4 border-r border-slate-100 text-right font-mono text-slate-600">
                     {v.cargoVolumeCBM && v.cargoVolumeCBM > 0 ? (
                       <span>{Math.round(v.cargoVolumeCBM).toLocaleString()}<span className="text-[9px] text-slate-400 ml-1 font-normal select-none">CBM</span></span>
