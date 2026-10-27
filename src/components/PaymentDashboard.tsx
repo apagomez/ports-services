@@ -5,8 +5,24 @@ import {
   PieChart, Pie, Cell, LineChart, Line, AreaChart, Area, LabelList
 } from 'recharts';
 import { PaymentDashboardData, VesselData, VoyagePaymentRecord } from '../types';
-import { Landmark, TrendingUp, Anchor, Ship, PlusCircle, Star, Search, X, ChevronRight, CheckCircle2 } from 'lucide-react';
+import { 
+  Landmark, 
+  TrendingUp, 
+  Anchor, 
+  Ship, 
+  PlusCircle, 
+  Star, 
+  Search, 
+  X, 
+  ChevronRight, 
+  CheckCircle2,
+  Calendar,
+  Clock,
+  Building2,
+  MapPin
+} from 'lucide-react';
 import { cn } from '../lib/utils';
+import { formatSystemDate } from '../utils/dateFormatter';
 import { PortTerminalModules } from './PortTerminalModules';
 import { VoyagePaymentLedger } from './VoyagePaymentLedger';
 
@@ -578,11 +594,21 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
     const startIndex = monthToIndex(startMonth);
     const endIndex = monthToIndex(endMonth);
 
-    return (data.voyagePayments || []).filter(p => {
-      const idx = monthToIndex(p.month);
-      return idx >= startIndex && idx <= endIndex;
-    });
-  }, [data.voyagePayments, startMonth, endMonth, monthToIndex]);
+    return (data.voyagePayments || [])
+      .filter(p => {
+        const idx = monthToIndex(p.month);
+        return idx >= startIndex && idx <= endIndex;
+      })
+      .map(p => {
+        const v = vesselMap.get(p.controlNo.trim().toUpperCase());
+        return {
+          ...p,
+          consignee: p.consignee?.trim() || v?.consignee?.trim() || '',
+          arrivalDate: p.arrivalDate || v?.arrivalDate || '',
+          departureDate: p.departureDate || v?.departureDate || ''
+        };
+      });
+  }, [data.voyagePayments, startMonth, endMonth, monthToIndex, vesselMap]);
 
   const monthsInSelection = useMemo(() => {
     const startIndex = monthToIndex(startMonth);
@@ -1578,157 +1604,330 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ data, vessel
       )}
 
       {/* Interactive Voyage Payment Inspector Modal */}
-      {selectedPayment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div 
-            onClick={() => setSelectedPayment(null)}
-            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200"
-          />
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col relative z-10 overflow-hidden animate-in zoom-in-95 duration-200">
-            {/* Header */}
-            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 px-6 py-5 border-b border-indigo-950 text-white flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[9px] font-mono uppercase tracking-[0.2em] bg-indigo-500/30 border border-indigo-400/40 text-indigo-200 px-2.5 py-0.5 rounded-full font-bold">
-                    Voyage Settlement Record
-                  </span>
-                  <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-amber-500/20 border border-amber-400/40 text-amber-200 font-bold uppercase">
-                    Encoded: Google Sheets GID 261075415
-                  </span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 font-bold uppercase">
-                    {getRecordTerminal(selectedPayment) || 'Port Terminal'}
-                  </span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/20 border border-blue-400/40 text-blue-200 font-bold uppercase">
-                    {selectedPayment.month}
-                  </span>
-                </div>
-                <h3 className="text-xl font-black font-mono tracking-tight flex items-center gap-2">
-                  <Landmark className="h-5 w-5 text-indigo-400" />
-                  {selectedPayment.controlNo}
-                </h3>
-                <p className="text-xs text-indigo-200/80 mt-0.5 font-sans font-medium">
-                  {selectedPayment.vesselName} • {selectedPayment.shippingAgency || 'No Shipping Agency'}
-                </p>
-              </div>
-              <button 
-                onClick={() => setSelectedPayment(null)}
-                className="text-white hover:bg-white/15 p-2 rounded-lg transition-colors cursor-pointer"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
+      {selectedPayment && (() => {
+        const selectedVesselRecord = 
+          vesselMap.get(selectedPayment.controlNo.trim().toUpperCase()) ||
+          (vesselData || []).find(v => 
+            v.controlNo && v.controlNo.trim().toUpperCase().replace(/\s+/g, '') === selectedPayment.controlNo.trim().toUpperCase().replace(/\s+/g, '')
+          ) ||
+          (vesselData || []).find(v => 
+            v.vesselName && selectedPayment.vesselName &&
+            v.vesselName.trim().toUpperCase() === selectedPayment.vesselName.trim().toUpperCase() &&
+            (!selectedPayment.month || selectedPayment.month === 'UNKNOWN' || v.month?.toUpperCase() === selectedPayment.month?.toUpperCase())
+          );
 
-            {/* Content Body */}
-            <div className="p-6 overflow-y-auto space-y-6">
-              {/* Summary Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="bg-blue-50/70 border border-blue-100 p-4 rounded-xl">
-                  <p className="text-[10px] font-mono uppercase text-blue-700 font-bold">Total Vessel Charges</p>
-                  <p className="text-xl font-black text-blue-950 mt-1 font-mono">{formatCurrency(selectedPayment.vesselTotal)}</p>
-                  <p className="text-[10px] text-blue-600/80 mt-0.5">Port dues, dockage, anchorage, pilotage</p>
-                </div>
-                <div className="bg-emerald-50/70 border border-emerald-100 p-4 rounded-xl">
-                  <p className="text-[10px] font-mono uppercase text-emerald-700 font-bold">Total Cargo Charges</p>
-                  <p className="text-xl font-black text-emerald-950 mt-1 font-mono">{formatCurrency(selectedPayment.cargoTotal)}</p>
-                  <p className="text-[10px] text-emerald-600/80 mt-0.5">Import & domestic wharfage + VAT</p>
-                </div>
-                <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl text-white">
-                  <p className="text-[10px] font-mono uppercase text-slate-400 font-bold">Total Actual Payment</p>
-                  <p className="text-xl font-black text-amber-400 mt-1 font-mono">{formatCurrency(selectedPayment.actualPayment || (selectedPayment.vesselTotal + selectedPayment.cargoTotal))}</p>
-                  <p className="text-[10px] text-slate-300 mt-0.5">Grand fee settlement total</p>
-                </div>
-              </div>
+        const arrivalDate = selectedPayment.arrivalDate || selectedVesselRecord?.arrivalDate || '';
+        const departureDate = selectedPayment.departureDate || selectedVesselRecord?.departureDate || '';
+        const consigneeFull = selectedPayment.consignee?.trim() || selectedVesselRecord?.consignee?.trim() || '—';
 
-              {/* Vessel Charges Breakdown */}
-              <div className="border border-slate-200 rounded-xl overflow-hidden">
-                <div className="bg-slate-100 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
-                  <h5 className="text-xs font-bold font-mono uppercase text-slate-800 flex items-center gap-2">
-                    <Ship className="w-3.5 h-3.5 text-blue-600" />
-                    Vessel Tariffs & Regulatory Dues
-                  </h5>
-                  <span className="text-xs font-mono font-bold text-blue-700">{formatCurrency(selectedPayment.vesselTotal)}</span>
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div 
+              onClick={() => setSelectedPayment(null)}
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200"
+            />
+            <div className="bg-white rounded-2xl border border-gray-200 shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col relative z-10 overflow-hidden animate-in zoom-in-95 duration-200">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 px-6 py-5 border-b border-indigo-950 text-white flex items-start justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                    <span className="text-[9px] font-mono uppercase tracking-[0.2em] bg-indigo-500/30 border border-indigo-400/40 text-indigo-200 px-2.5 py-0.5 rounded-full font-bold">
+                      Voyage Settlement Record
+                    </span>
+                    <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-amber-500/20 border border-amber-400/40 text-amber-200 font-bold uppercase">
+                      Encoded: Google Sheets GID 261075415
+                    </span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 font-bold uppercase">
+                      {getRecordTerminal(selectedPayment) || 'Port Terminal'}
+                    </span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/20 border border-blue-400/40 text-blue-200 font-bold uppercase">
+                      {selectedPayment.month}
+                    </span>
+                  </div>
+                  <h3 className="text-xl font-black font-mono tracking-tight flex items-center gap-2">
+                    <Landmark className="h-5 w-5 text-indigo-400" />
+                    {selectedPayment.controlNo}
+                  </h3>
+                  <p className="text-xs text-indigo-200/90 mt-1 font-sans font-medium flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-white text-sm">{selectedPayment.vesselName}</span>
+                    <span>•</span>
+                    <span>{selectedPayment.shippingAgency || 'No Shipping Agency'}</span>
+                  </p>
+
+                  {/* Header Date Indicators */}
+                  <div className="flex items-center gap-2 mt-2.5 flex-wrap text-[11px] font-mono">
+                    <div className="flex items-center gap-1.5 bg-cyan-950/60 border border-cyan-500/30 text-cyan-200 px-2.5 py-1 rounded-md">
+                      <Calendar className="w-3.5 h-3.5 text-cyan-400" />
+                      <span className="text-cyan-300/80">Arrival:</span>
+                      <strong className="text-cyan-100 font-bold">{formatSystemDate(arrivalDate)}</strong>
+                    </div>
+                    <div className="flex items-center gap-1.5 bg-amber-950/60 border border-amber-500/30 text-amber-200 px-2.5 py-1 rounded-md">
+                      <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                      <span className="text-amber-300/80">Departure:</span>
+                      <strong className="text-amber-100 font-bold">{departureDate ? formatSystemDate(departureDate) : 'In Port / Not Recorded'}</strong>
+                    </div>
+                    {selectedVesselRecord?.voyageNo && (
+                      <div className="flex items-center gap-1.5 bg-indigo-900/40 border border-indigo-400/30 text-indigo-200 px-2.5 py-1 rounded-md">
+                        <Ship className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>Voyage #{selectedVesselRecord.voyageNo}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y divide-slate-100 text-xs">
-                  <div className="p-3">
-                    <span className="text-[10px] font-mono text-slate-400 uppercase block">Port Dues</span>
-                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.portDues)}</span>
-                  </div>
-                  <div className="p-3">
-                    <span className="text-[10px] font-mono text-slate-400 uppercase block">Dockage Fee</span>
-                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.dockage)}</span>
-                  </div>
-                  <div className="p-3">
-                    <span className="text-[10px] font-mono text-slate-400 uppercase block">Anchorage Fee</span>
-                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.anchorage)}</span>
-                  </div>
-                  <div className="p-3">
-                    <span className="text-[10px] font-mono text-slate-400 uppercase block">Pilotage Fee</span>
-                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.pilotage)}</span>
-                  </div>
-                  <div className="p-3">
-                    <span className="text-[10px] font-mono text-slate-400 uppercase block">Usage Fee</span>
-                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.usageFee)}</span>
-                  </div>
-                  <div className="p-3">
-                    <span className="text-[10px] font-mono text-slate-400 uppercase block">Service Fee</span>
-                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.serviceFee)}</span>
-                  </div>
-                  <div className="p-3">
-                    <span className="text-[10px] font-mono text-slate-400 uppercase block">VAT Vessel</span>
-                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.vatVessel)}</span>
-                  </div>
-                  <div className="p-3 bg-blue-50/40">
-                    <span className="text-[10px] font-mono text-blue-700 uppercase font-bold block">Vessel Subtotal</span>
-                    <span className="font-extrabold text-blue-900 font-mono mt-0.5 block">{formatCurrency(selectedPayment.vesselTotal)}</span>
-                  </div>
-                </div>
+                <button 
+                  onClick={() => setSelectedPayment(null)}
+                  className="text-white hover:bg-white/15 p-2 rounded-lg transition-colors cursor-pointer shrink-0"
+                >
+                  <X className="h-5 w-5" />
+                </button>
               </div>
 
-              {/* Cargo Charges Breakdown */}
-              <div className="border border-slate-200 rounded-xl overflow-hidden">
-                <div className="bg-slate-100 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
-                  <h5 className="text-xs font-bold font-mono uppercase text-slate-800 flex items-center gap-2">
-                    <Landmark className="w-3.5 h-3.5 text-emerald-600" />
-                    Cargo Wharfage & Consignee Charges
-                  </h5>
-                  <span className="text-xs font-mono font-bold text-emerald-700">{formatCurrency(selectedPayment.cargoTotal)}</span>
+              {/* Content Body */}
+              <div className="p-6 overflow-y-auto space-y-5">
+                {/* Summary Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="bg-blue-50/70 border border-blue-100 p-4 rounded-xl">
+                    <p className="text-[10px] font-mono uppercase text-blue-700 font-bold">Total Vessel Charges</p>
+                    <p className="text-xl font-black text-blue-950 mt-1 font-mono">{formatCurrency(selectedPayment.vesselTotal)}</p>
+                    <p className="text-[10px] text-blue-600/80 mt-0.5">Port dues, dockage, anchorage, pilotage</p>
+                  </div>
+                  <div className="bg-emerald-50/70 border border-emerald-100 p-4 rounded-xl">
+                    <p className="text-[10px] font-mono uppercase text-emerald-700 font-bold">Total Cargo Charges</p>
+                    <p className="text-xl font-black text-emerald-950 mt-1 font-mono">{formatCurrency(selectedPayment.cargoTotal)}</p>
+                    <p className="text-[10px] text-emerald-600/80 mt-0.5">Import & domestic wharfage + VAT</p>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl text-white">
+                    <p className="text-[10px] font-mono uppercase text-slate-400 font-bold">Total Actual Payment</p>
+                    <p className="text-xl font-black text-amber-400 mt-1 font-mono">{formatCurrency(selectedPayment.actualPayment || (selectedPayment.vesselTotal + selectedPayment.cargoTotal))}</p>
+                    <p className="text-[10px] text-slate-300 mt-0.5">Grand fee settlement total</p>
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y divide-slate-100 text-xs">
-                  <div className="p-3">
-                    <span className="text-[10px] font-mono text-slate-400 uppercase block">Consignee</span>
-                    <span className="font-bold text-slate-800 mt-0.5 block truncate">{selectedPayment.consignee || '—'}</span>
+
+                {/* Voyage Schedule & Vessel Port Movement Record */}
+                <div className="bg-slate-50/80 border border-slate-200 rounded-xl p-4.5">
+                  <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-200">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                        <Ship className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold font-mono uppercase text-slate-800 tracking-wide">
+                          Voyage Schedule & Vessel Movement Record
+                        </h4>
+                        <p className="text-[11px] text-slate-500 font-mono">
+                          Official port entry & clearance logs for Control #{selectedPayment.controlNo}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-mono font-semibold px-2.5 py-0.5 rounded-full bg-slate-200 text-slate-700 uppercase">
+                      {selectedVesselRecord?.orientation || (selectedPayment.importWharfage > 0 ? 'Foreign' : 'Domestic')} Trade
+                    </span>
                   </div>
-                  <div className="p-3">
-                    <span className="text-[10px] font-mono text-slate-400 uppercase block">Import Wharfage</span>
-                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.importWharfage)}</span>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                    {/* Date of Arrival */}
+                    <div className="bg-white p-3.5 rounded-lg border border-slate-200 shadow-2xs">
+                      <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase font-bold text-cyan-700 mb-1">
+                        <Calendar className="w-3.5 h-3.5 text-cyan-600" />
+                        Date of Arrival
+                      </div>
+                      <div className="text-base font-black font-mono text-slate-900">
+                        {formatSystemDate(arrivalDate)}
+                      </div>
+                      <div className="text-[10px] font-mono text-slate-400 mt-0.5 truncate" title={arrivalDate}>
+                        {arrivalDate && arrivalDate !== '-' ? `Log: ${arrivalDate}` : 'Arrival recorded in port'}
+                      </div>
+                    </div>
+
+                    {/* Date of Departure */}
+                    <div className="bg-white p-3.5 rounded-lg border border-slate-200 shadow-2xs">
+                      <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase font-bold text-amber-700 mb-1">
+                        <Calendar className="w-3.5 h-3.5 text-amber-600" />
+                        Date of Departure
+                      </div>
+                      <div className="text-base font-black font-mono text-slate-900">
+                        {departureDate ? formatSystemDate(departureDate) : 'In Port / Pending'}
+                      </div>
+                      <div className="text-[10px] font-mono text-slate-400 mt-0.5 truncate" title={departureDate}>
+                        {departureDate && departureDate !== '-' ? `Log: ${departureDate}` : 'Departure clearance status'}
+                      </div>
+                    </div>
+
+                    {/* Port Berth Stay */}
+                    <div className="bg-white p-3.5 rounded-lg border border-slate-200 shadow-2xs">
+                      <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase font-bold text-emerald-700 mb-1">
+                        <Clock className="w-3.5 h-3.5 text-emerald-600" />
+                        Berth Duration
+                      </div>
+                      <div className="text-base font-black font-mono text-slate-900">
+                        {selectedVesselRecord?.atBerthDays !== undefined ? `${selectedVesselRecord.atBerthDays} Day(s)` : 'Standard Stay'}
+                      </div>
+                      <div className="text-[10px] font-mono text-slate-400 mt-0.5">
+                        Terminal: {getRecordTerminal(selectedPayment) || 'Anchorage/Pier'}
+                      </div>
+                    </div>
+
+                    {/* Routing & Origin/Destination */}
+                    <div className="bg-white p-3.5 rounded-lg border border-slate-200 shadow-2xs">
+                      <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase font-bold text-indigo-700 mb-1">
+                        <Anchor className="w-3.5 h-3.5 text-indigo-600" />
+                        Port Route
+                      </div>
+                      <div className="text-xs font-bold text-slate-900 truncate" title={`${selectedVesselRecord?.origin || 'Origin'} → ${selectedVesselRecord?.nextPort || 'Next Port'}`}>
+                        {selectedVesselRecord?.origin || 'Origin'} → {selectedVesselRecord?.nextPort || 'Next Port'}
+                      </div>
+                      <div className="text-[10px] font-mono text-slate-400 mt-0.5 truncate">
+                        Purpose: {selectedVesselRecord?.purpose || selectedVesselRecord?.operation || 'Cargo Operation'}
+                      </div>
+                    </div>
                   </div>
-                  <div className="p-3">
-                    <span className="text-[10px] font-mono text-slate-400 uppercase block">Domestic Wharfage</span>
-                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.domesticWharfage)}</span>
+                </div>
+
+                {/* FULL Registered Consignee & Consignment Card (NO TRUNCATION) */}
+                <div className="bg-gradient-to-br from-emerald-50/90 via-teal-50/40 to-white border-2 border-emerald-300/80 rounded-xl p-4.5 shadow-2xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-emerald-100">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold">
+                        <Building2 className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-mono uppercase font-bold tracking-wider text-emerald-900 block">
+                          Registered Consignee / Cargo Receiver (Full Name)
+                        </span>
+                        <span className="text-[11px] text-emerald-700 font-mono">
+                          Official recipient and party billed for cargo wharfage dues
+                        </span>
+                      </div>
+                    </div>
+                    <span className="self-start sm:self-auto text-[10px] font-mono px-2.5 py-1 rounded bg-emerald-100 border border-emerald-300 text-emerald-900 font-bold uppercase">
+                      Official Consignee
+                    </span>
                   </div>
-                  <div className="p-3">
-                    <span className="text-[10px] font-mono text-slate-400 uppercase block">VAT Cargo</span>
-                    <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.vatCargo)}</span>
+
+                  <div className="mt-1">
+                    <p className="text-base sm:text-lg font-black text-slate-950 font-sans tracking-tight leading-snug break-words selection:bg-emerald-200">
+                      {consigneeFull}
+                    </p>
+                    
+                    {/* Consignment and manifest metadata */}
+                    <div className="mt-3 pt-2.5 border-t border-emerald-100 flex flex-wrap items-center gap-y-2 gap-x-5 text-xs font-mono text-slate-600">
+                      {selectedVesselRecord?.cargoDescription && (
+                        <div>
+                          <span className="text-slate-400 uppercase text-[10px] block">Manifest Cargo:</span>
+                          <strong className="text-slate-900">{selectedVesselRecord.cargoDescription}</strong>
+                        </div>
+                      )}
+                      {selectedVesselRecord?.cargoVolumeMT ? (
+                        <div>
+                          <span className="text-slate-400 uppercase text-[10px] block">Cargo Volume:</span>
+                          <strong className="text-slate-900">{selectedVesselRecord.cargoVolumeMT.toLocaleString()} MT</strong>
+                        </div>
+                      ) : null}
+                      {selectedVesselRecord?.shippingLine && (
+                        <div>
+                          <span className="text-slate-400 uppercase text-[10px] block">Shipping Line:</span>
+                          <strong className="text-slate-900">{selectedVesselRecord.shippingLine}</strong>
+                        </div>
+                      )}
+                      <div>
+                        <span className="text-slate-400 uppercase text-[10px] block">Settlement Period:</span>
+                        <strong className="text-slate-900">{selectedPayment.month}</strong>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Vessel Charges Breakdown */}
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <div className="bg-slate-100 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+                    <h5 className="text-xs font-bold font-mono uppercase text-slate-800 flex items-center gap-2">
+                      <Ship className="w-3.5 h-3.5 text-blue-600" />
+                      Vessel Tariffs & Regulatory Dues
+                    </h5>
+                    <span className="text-xs font-mono font-bold text-blue-700">{formatCurrency(selectedPayment.vesselTotal)}</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y divide-slate-100 text-xs">
+                    <div className="p-3">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase block">Port Dues</span>
+                      <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.portDues)}</span>
+                    </div>
+                    <div className="p-3">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase block">Dockage Fee</span>
+                      <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.dockage)}</span>
+                    </div>
+                    <div className="p-3">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase block">Anchorage Fee</span>
+                      <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.anchorage)}</span>
+                    </div>
+                    <div className="p-3">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase block">Pilotage Fee</span>
+                      <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.pilotage)}</span>
+                    </div>
+                    <div className="p-3">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase block">Usage Fee</span>
+                      <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.usageFee)}</span>
+                    </div>
+                    <div className="p-3">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase block">Service Fee</span>
+                      <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.serviceFee)}</span>
+                    </div>
+                    <div className="p-3">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase block">VAT Vessel</span>
+                      <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.vatVessel)}</span>
+                    </div>
+                    <div className="p-3 bg-blue-50/40">
+                      <span className="text-[10px] font-mono text-blue-700 uppercase font-bold block">Vessel Subtotal</span>
+                      <span className="font-extrabold text-blue-900 font-mono mt-0.5 block">{formatCurrency(selectedPayment.vesselTotal)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Cargo Charges Breakdown */}
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <div className="bg-slate-100 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+                    <h5 className="text-xs font-bold font-mono uppercase text-slate-800 flex items-center gap-2">
+                      <Landmark className="w-3.5 h-3.5 text-emerald-600" />
+                      Cargo Wharfage & Tariff Breakdown
+                    </h5>
+                    <span className="text-xs font-mono font-bold text-emerald-700">{formatCurrency(selectedPayment.cargoTotal)}</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y divide-slate-100 text-xs">
+                    <div className="p-3">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase block">Import Wharfage</span>
+                      <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.importWharfage)}</span>
+                    </div>
+                    <div className="p-3">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase block">Domestic Wharfage</span>
+                      <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.domesticWharfage)}</span>
+                    </div>
+                    <div className="p-3">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase block">VAT Cargo</span>
+                      <span className="font-bold text-slate-800 font-mono mt-0.5 block">{formatCurrency(selectedPayment.vatCargo)}</span>
+                    </div>
+                    <div className="p-3 bg-emerald-50/40">
+                      <span className="text-[10px] font-mono text-emerald-700 uppercase font-bold block">Cargo Subtotal</span>
+                      <span className="font-extrabold text-emerald-900 font-mono mt-0.5 block">{formatCurrency(selectedPayment.cargoTotal)}</span>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
 
-            {/* Footer */}
-            <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
-              <span className="text-xs font-mono text-slate-500">
-                Payment Control ID: <strong className="text-slate-800 font-bold">{selectedPayment.controlNo}</strong>
-              </span>
-              <button 
-                onClick={() => setSelectedPayment(null)}
-                className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors"
-              >
-                Done
-              </button>
+              {/* Footer */}
+              <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+                <span className="text-xs font-mono text-slate-500">
+                  Payment Control ID: <strong className="text-slate-800 font-bold">{selectedPayment.controlNo}</strong>
+                </span>
+                <button 
+                  onClick={() => setSelectedPayment(null)}
+                  className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors"
+                >
+                  Done
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

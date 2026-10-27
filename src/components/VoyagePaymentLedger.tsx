@@ -14,10 +14,13 @@ import {
   Ship,
   FileSpreadsheet,
   CheckCircle2,
-  DollarSign
+  DollarSign,
+  Calendar
 } from 'lucide-react';
 import { VoyagePaymentRecord } from '../types';
 import { cn } from '../lib/utils';
+import { formatSystemDate } from '../utils/dateFormatter';
+import { compareControlNumbers } from '../utils/vesselComparator';
 
 interface VoyagePaymentLedgerProps {
   payments: VoyagePaymentRecord[];
@@ -118,8 +121,10 @@ export const VoyagePaymentLedger: React.FC<VoyagePaymentLedgerProps> = ({
         const matchesConsignee = p.consignee?.toLowerCase().includes(q);
         const matchesTerm = recordTerm.toLowerCase().includes(q);
         const matchesMonth = p.month?.toLowerCase().includes(q);
+        const matchesDates = (p.arrivalDate && p.arrivalDate.toLowerCase().includes(q)) || 
+                             (p.departureDate && p.departureDate.toLowerCase().includes(q));
 
-        if (!matchesControl && !matchesVessel && !matchesAgency && !matchesConsignee && !matchesTerm && !matchesMonth) {
+        if (!matchesControl && !matchesVessel && !matchesAgency && !matchesConsignee && !matchesTerm && !matchesMonth && !matchesDates) {
           return false;
         }
       }
@@ -181,8 +186,13 @@ export const VoyagePaymentLedger: React.FC<VoyagePaymentLedgerProps> = ({
         bVal = b.actualPayment || (b.vesselTotal + b.cargoTotal) || 0;
       }
 
+      if (sortField === 'controlNo') {
+        const comp = compareControlNumbers(aVal, bVal);
+        return sortOrder === 'asc' ? comp : -comp;
+      }
+
       if (typeof aVal === 'string') {
-        const comp = (aVal || '').localeCompare(bVal || '');
+        const comp = (aVal || '').localeCompare(bVal || '', undefined, { numeric: true, sensitivity: 'base' });
         return sortOrder === 'asc' ? comp : -comp;
       }
 
@@ -263,6 +273,8 @@ export const VoyagePaymentLedger: React.FC<VoyagePaymentLedgerProps> = ({
       'Month',
       'Port Terminal',
       'Vessel Name',
+      'Arrival Date',
+      'Departure Date',
       'Shipping Line / Agency',
       'Consignee',
       'Port Dues (PHP)',
@@ -277,6 +289,8 @@ export const VoyagePaymentLedger: React.FC<VoyagePaymentLedgerProps> = ({
       `"${p.month || ''}"`,
       `"${getRecordTerminal(p) || ''}"`,
       `"${(p.vesselName || '').replace(/"/g, '""')}"`,
+      `"${p.arrivalDate || ''}"`,
+      `"${p.departureDate || ''}"`,
       `"${(p.shippingAgency || '').replace(/"/g, '""')}"`,
       `"${(p.consignee || '').replace(/"/g, '""')}"`,
       p.portDues || 0,
@@ -618,7 +632,7 @@ export const VoyagePaymentLedger: React.FC<VoyagePaymentLedgerProps> = ({
               </th>
               <th 
                 onClick={() => handleSort('consignee')}
-                className="p-3 cursor-pointer hover:bg-slate-800 transition-colors"
+                className="p-3 min-w-[190px] cursor-pointer hover:bg-slate-800 transition-colors"
               >
                 <div className="flex items-center gap-1">
                   <span>Consignee</span>
@@ -740,11 +754,27 @@ export const VoyagePaymentLedger: React.FC<VoyagePaymentLedgerProps> = ({
                           </button>
                         )}
                       </div>
+                      {(p.arrivalDate || p.departureDate) && (
+                        <div className="flex items-center gap-1.5 mt-1 text-[10px] font-mono font-normal">
+                          {p.arrivalDate && (
+                            <span className="inline-flex items-center gap-1 text-cyan-800 bg-cyan-50 px-1.5 py-0.5 rounded border border-cyan-200" title={`Date of Arrival: ${p.arrivalDate}`}>
+                              <Calendar className="w-2.5 h-2.5 text-cyan-600 shrink-0" />
+                              <span>Arr: {formatSystemDate(p.arrivalDate)}</span>
+                            </span>
+                          )}
+                          {p.departureDate && (
+                            <span className="inline-flex items-center gap-1 text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200" title={`Date of Departure: ${p.departureDate}`}>
+                              <Calendar className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                              <span>Dep: {formatSystemDate(p.departureDate)}</span>
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="p-3 text-slate-600 truncate max-w-[150px]" title={p.shippingAgency}>
                       {p.shippingAgency || '—'}
                     </td>
-                    <td className="p-3 text-slate-600 truncate max-w-[150px]" title={p.consignee}>
+                    <td className="p-3 text-slate-800 font-medium text-xs min-w-[190px] max-w-[300px] break-words" title={p.consignee}>
                       {p.consignee || '—'}
                     </td>
                     <td className="p-3 text-right font-mono font-semibold text-blue-600 whitespace-nowrap">

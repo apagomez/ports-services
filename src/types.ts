@@ -161,6 +161,8 @@ export interface VoyagePaymentRecord {
   actualPayment: number;
   vesselTotal: number;
   cargoTotal: number;
+  arrivalDate?: string;
+  departureDate?: string;
 }
 
 export interface PaymentDashboardData {

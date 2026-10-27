@@ -109,21 +109,22 @@ export async function fetchVesselData(): Promise<VesselData[]> {
         const rows = results.data as string[][];
         const vesselData: VesselData[] = rows
           .filter(row => {
-            const hasControlNo = row[0]?.startsWith('PSD-');
-            const hasAve = row[1]?.trim() !== '';
-            const hasVesselName = row[5]?.trim() !== '';
-            return hasControlNo && hasAve && hasVesselName;
+            const ctrl = (row[0] || '').trim().toUpperCase();
+            const hasControlNo = ctrl.startsWith('PSD-');
+            const hasVesselName = (row[5] || '').trim() !== '';
+            return hasControlNo && hasVesselName;
           })
           .map(row => {
+            const ctrl = (row[0] || '').trim().toUpperCase();
             const orientation = row[4]?.toLowerCase().includes('foreign') ? 'Foreign' : 'Domestic';
             const gt = parseFloat(row[20]?.replace(/,/g, '')) || 0;
             return {
-              controlNo: row[0],
-              aveNumber: row[1],
-              month: row[2],
+              controlNo: ctrl,
+              aveNumber: (row[1] || '').trim() || (ctrl.match(/^PSD-\d+-(\d+)/i)?.[1] || '000'),
+              month: (row[2] || '').trim().toUpperCase() || 'UNKNOWN',
               terminal: normalizeTerminal(row[3]) || 'ANCHORAGE',
-              voyageType: row[4],
-              vesselName: row[5] || 'UNNAMED VESSEL',
+              voyageType: row[4] || 'DOMESTIC',
+              vesselName: (row[5] || '').trim() || 'UNNAMED VESSEL',
               voyageNo: row[6],
               status: row[7] || 'UNKNOWN',
               remarks: row[8],
@@ -453,6 +454,8 @@ export async function fetchPaymentData(): Promise<PaymentDashboardData> {
                 const vDomesticWharfageIdx = findVIdx(['DOMESTIC WHARFAGE'], 40);
                 const vVatCargoIdx = findVIdx(['VAT - C'], 41);
                 const vActualPaymentIdx = findVIdx(['ACTUAL PAYMENT'], 42);
+                const vArrivalIdx = findVIdx(['ARRIVAL DATE', 'DATE OF ARRIVAL', 'ARRIVAL', 'ARRIVED', 'ATA', 'ETA'], -1);
+                const vDepartureIdx = findVIdx(['DEPARTURE DATE', 'DATE OF DEPARTURE', 'DEPARTURE', 'DEPARTED', 'ATD', 'ETD'], -1);
 
                 const voyagePayments: VoyagePaymentRecord[] = [];
                 const vStartIdx = vHeaderRowIdx !== -1 ? vHeaderRowIdx + 1 : 11;
@@ -481,6 +484,9 @@ export async function fetchPaymentData(): Promise<PaymentDashboardData> {
                   const vatCargo = parseCurrency(row[vVatCargoIdx]);
                   const actualPayment = parseCurrency(row[vActualPaymentIdx]);
 
+                  const arrivalDate = vArrivalIdx !== -1 ? row[vArrivalIdx]?.trim() || '' : '';
+                  const departureDate = vDepartureIdx !== -1 ? row[vDepartureIdx]?.trim() || '' : '';
+
                   const vesselTotal = portDues + dockage + anchorage + pilotage + usageFee + serviceFee + vatVessel;
                   const cargoTotal = actualPayment || (importWharfage + domesticWharfage + vatCargo);
 
@@ -503,7 +509,9 @@ export async function fetchPaymentData(): Promise<PaymentDashboardData> {
                     vatCargo,
                     actualPayment,
                     vesselTotal,
-                    cargoTotal
+                    cargoTotal,
+                    arrivalDate: arrivalDate || undefined,
+                    departureDate: departureDate || undefined
                   });
                 });
 

@@ -7,6 +7,7 @@ import {
 import { VesselData } from '../types';
 import { Package, TrendingUp, Scale, Boxes, X, Fingerprint } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { compareControlNumbers } from '../utils/vesselComparator';
 
 interface CargoDashboardProps {
   data: VesselData[];
@@ -62,7 +63,7 @@ export const CargoDashboard: React.FC<CargoDashboardProps> = ({ data }) => {
       const matchesType = colFilters.type === 'All' || v.orientation === colFilters.type;
 
       return matchesMonthRange && matchesMain && matchesTerminal && matchesId && matchesVessel && matchesDesc && matchesType;
-    });
+    }).sort((a, b) => compareControlNumbers(b.controlNo, a.controlNo));
   }, [data, cargoFilter, terminalFilter, colFilters, startMonth, endMonth]);
 
   const totalVolumeMT = useMemo(() => {
@@ -378,7 +379,7 @@ export const CargoDashboard: React.FC<CargoDashboardProps> = ({ data }) => {
               </tr>
             </thead>
             <tbody>
-              {filteredData.slice(0, 100).map((v, i) => (
+              {filteredData.map((v, i) => (
                 <tr key={i} className={cn("border-b border-gray-100 hover:bg-gray-50 transition-colors", i % 2 === 0 ? "bg-white" : "bg-gray-50")}>
                   <td className="p-3 font-mono opacity-50 border-r border-gray-100">{v.controlNo}</td>
                   <td className="p-3 font-bold border-r border-gray-100">{v.vesselName}</td>

@@ -58,6 +58,7 @@ import { ApplicationDashboard } from './components/ApplicationDashboard';
 import { formatSystemDate } from './utils/dateFormatter';
 import { safeStorage } from './utils/safeStorage';
 import { normalizeTerminal, matchesTerminalFilter, FAB_PORT_TERMINALS } from './utils/terminalNormalizer';
+import { compareControlNumbers } from './utils/vesselComparator';
 import { initAuth, logout as googleLogout, googleSignIn, getAccessToken, appendApplicationToSheet, deleteApplicationFromSheet } from './services/googleSheetsService';
 
 // Official Freeport Area of Bataan (FAB) & Port Regulations navigation/regulatory signaling colors:
@@ -147,7 +148,9 @@ export default function App() {
   const [endMonth, setEndMonth] = useState<string>('DECEMBER');
   const [activeTab, setActiveTab] = useState<'vessels' | 'payments' | 'cargo' | 'stats' | 'applications'>('vessels');
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 20;
+  const [pageSize, setPageSize] = useState<number>(20);
+  const [vesselSortField, setVesselSortField] = useState<string>('controlNo');
+  const [vesselSortOrder, setVesselSortOrder] = useState<'asc' | 'desc'>('desc');
 
   // Remove the restriction that forces mobile view away from the statistics tab.
   // This ensures the Statistics tab remains fully accessible on phone screens.
@@ -231,7 +234,7 @@ export default function App() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, filterType, filterVoyage, startMonth, endMonth, filterAnomaly, colFilters]);
+  }, [search, filterType, filterVoyage, startMonth, endMonth, filterAnomaly, colFilters, vesselSortField, vesselSortOrder, pageSize]);
 
   const fetchData = useCallback(async (isInitial = false) => {
     if (!authRole) return; // Don't fetch until logged in
@@ -303,7 +306,7 @@ export default function App() {
         
         const mappedVessel: VesselData = {
           controlNo: app.id || '',
-          aveNumber: (app.id || '').match(/-(\d{3})-?/)?.[1] || '000',
+          aveNumber: (app.id || '').match(/-(\d+)-?/)?.[1] || '000',
           month: app.createdAt ? new Date(app.createdAt).toLocaleString('default', { month: 'long' }).toUpperCase() : 'UNKNOWN',
           terminal: normalizeTerminal(app.terminal) || 'ANCHORAGE',
           voyageType: app.voyageType || 'DOMESTIC',
@@ -381,8 +384,48 @@ export default function App() {
       return matchesSearch && matchesType && matchesVoyage && matchesMonth && matchesAnomaly &&
              matchesId && matchesName && matchesOrientation && matchesColType &&
              matchesTerminal && matchesLoadVolume && matchesCargoDesc && matchesStatus && matchesArrival && matchesDeparture;
-    }).sort((a, b) => b.controlNo.localeCompare(a.controlNo));
-  }, [allVessels, search, filterType, filterVoyage, startMonth, endMonth, filterAnomaly, colFilters, monthsList]);
+    }).sort((a, b) => {
+      let comparison = 0;
+      if (vesselSortField === 'controlNo') {
+        comparison = compareControlNumbers(a.controlNo, b.controlNo);
+      } else if (vesselSortField === 'vesselName') {
+        comparison = (a.vesselName || '').localeCompare(b.vesselName || '');
+      } else if (vesselSortField === 'orientation') {
+        comparison = (a.orientation || '').localeCompare(b.orientation || '');
+      } else if (vesselSortField === 'terminal') {
+        comparison = (a.terminal || '').localeCompare(b.terminal || '');
+      } else if (vesselSortField === 'loadVolume') {
+        const volA = a.cargoVolumeMT || a.cargoVolumeCBM || 0;
+        const volB = b.cargoVolumeMT || b.cargoVolumeCBM || 0;
+        comparison = volA - volB;
+      } else if (vesselSortField === 'cargoDesc') {
+        comparison = (a.cargoDescription || '').localeCompare(b.cargoDescription || '');
+      } else if (vesselSortField === 'status') {
+        comparison = (a.status || '').localeCompare(b.status || '');
+      } else if (vesselSortField === 'arrivalDate') {
+        const timeA = a.arrivalDate ? new Date(a.arrivalDate).getTime() : 0;
+        const timeB = b.arrivalDate ? new Date(b.arrivalDate).getTime() : 0;
+        comparison = (isNaN(timeA) ? 0 : timeA) - (isNaN(timeB) ? 0 : timeB);
+      } else if (vesselSortField === 'departureDate') {
+        const timeA = a.departureDate ? new Date(a.departureDate).getTime() : 0;
+        const timeB = b.departureDate ? new Date(b.departureDate).getTime() : 0;
+        comparison = (isNaN(timeA) ? 0 : timeA) - (isNaN(timeB) ? 0 : timeB);
+      } else {
+        comparison = compareControlNumbers(a.controlNo, b.controlNo);
+      }
+
+      return vesselSortOrder === 'asc' ? comparison : -comparison;
+    });
+  }, [allVessels, search, filterType, filterVoyage, startMonth, endMonth, filterAnomaly, colFilters, monthsList, vesselSortField, vesselSortOrder]);
+
+  const handleVesselSort = (field: string) => {
+    if (vesselSortField === field) {
+      setVesselSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setVesselSortField(field);
+      setVesselSortOrder('desc');
+    }
+  };
 
   const arrivingVessels = useMemo(() => {
     return allVessels
@@ -438,11 +481,12 @@ export default function App() {
   }, [filteredData]);
 
   const paginatedData = useMemo(() => {
-    const start = (currentPage - 1) * itemsPerPage;
-    return filteredData.slice(start, start + itemsPerPage);
-  }, [filteredData, currentPage]);
+    if (pageSize >= 9999) return filteredData;
+    const start = (currentPage - 1) * pageSize;
+    return filteredData.slice(start, start + pageSize);
+  }, [filteredData, currentPage, pageSize]);
 
-  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+  const totalPages = pageSize >= 9999 ? 1 : Math.ceil(filteredData.length / pageSize);
 
   const handleStatClick = (type: 'total' | 'departed' | 'atAnchorage' | 'berthed' | 'arriving') => {
     // Reset all status checks and find matching status from data
@@ -818,32 +862,61 @@ export default function App() {
                   trend={stats.criticalCount && stats.criticalCount > 0 ? `${stats.criticalCount} CRIT` : undefined}
                 />
               </section>
-              <VesselTable paginatedData={paginatedData} colFilters={colFilters} setColFilters={setColFilters} uniqueTerminals={uniqueTerminals} uniqueStatuses={uniqueStatuses} setSelectedVessel={setSelectedVessel} />
+              <VesselTable 
+                paginatedData={paginatedData} 
+                colFilters={colFilters} 
+                setColFilters={setColFilters} 
+                uniqueTerminals={uniqueTerminals} 
+                uniqueStatuses={uniqueStatuses} 
+                setSelectedVessel={setSelectedVessel}
+                sortField={vesselSortField}
+                sortOrder={vesselSortOrder}
+                onSort={handleVesselSort}
+              />
 
               {/* Pagination Controls */}
-              <div className="flex flex-col md:flex-row items-center justify-between p-6 bg-white border border-t-0 border-slate-200 rounded-b-xl shadow-sm">
-                <div className="text-[10px] font-bold text-slate-400 uppercase mb-4 md:mb-0 tracking-wider">
-                  Displaying {Math.min(filteredData.length, (currentPage - 1) * itemsPerPage + 1)}-{Math.min(filteredData.length, currentPage * itemsPerPage)} of {filteredData.length} vessels
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button 
-                    disabled={currentPage === 1}
-                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                    className="p-2 border border-slate-200 rounded-lg disabled:opacity-30 hover:bg-fab-blue hover:text-white hover:border-fab-blue transition-all"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <div className="text-[10px] font-extrabold text-fab-blue px-4 tracking-tighter uppercase">
-                    Page {currentPage} of {Math.max(1, totalPages)}
+              <div className="flex flex-col md:flex-row items-center justify-between p-4 bg-white border border-t-0 border-slate-200 rounded-b-xl shadow-sm gap-4">
+                <div className="flex flex-wrap items-center gap-4">
+                  <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    Displaying {filteredData.length === 0 ? 0 : (pageSize >= 9999 ? 1 : (currentPage - 1) * pageSize + 1)}-{pageSize >= 9999 ? filteredData.length : Math.min(filteredData.length, currentPage * pageSize)} of {filteredData.length.toLocaleString()} vessels
                   </div>
-                  <button 
-                    disabled={currentPage >= totalPages}
-                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                    className="p-2 border border-slate-200 rounded-lg disabled:opacity-30 hover:bg-fab-blue hover:text-white hover:border-fab-blue transition-all"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-1.5 text-xs">
+                    <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Show:</span>
+                    <select
+                      value={pageSize}
+                      onChange={(e) => setPageSize(Number(e.target.value))}
+                      className="text-xs font-bold border border-slate-200 rounded px-2 py-1 bg-white text-slate-700 focus:outline-none focus:border-fab-blue cursor-pointer"
+                    >
+                      <option value={20}>20 per page</option>
+                      <option value={50}>50 per page</option>
+                      <option value={100}>100 per page</option>
+                      <option value={250}>250 per page</option>
+                      <option value={9999}>All ({filteredData.length})</option>
+                    </select>
+                  </div>
                 </div>
+
+                {pageSize < 9999 && totalPages > 1 && (
+                  <div className="flex items-center gap-1.5">
+                    <button 
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      className="p-2 border border-slate-200 rounded-lg disabled:opacity-30 hover:bg-fab-blue hover:text-white hover:border-fab-blue transition-all"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <div className="text-[10px] font-extrabold text-fab-blue px-4 tracking-tighter uppercase">
+                      Page {currentPage} of {Math.max(1, totalPages)}
+                    </div>
+                    <button 
+                      disabled={currentPage >= totalPages}
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                      className="p-2 border border-slate-200 rounded-lg disabled:opacity-30 hover:bg-fab-blue hover:text-white hover:border-fab-blue transition-all"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
               </div>
 
               <section className="grid grid-cols-1 gap-6">

@@ -295,7 +295,7 @@ export const appendApplicationToSheet = async (appData: VesselApplication): Prom
       ]
     ];
   } else {
-    const aveMatch = (appData.id || '').match(/-(\d{3})-?/);
+    const aveMatch = (appData.id || '').match(/-(\d+)-?/);
     const aveNumber = aveMatch ? aveMatch[1] : '';
 
     const remarksText = [

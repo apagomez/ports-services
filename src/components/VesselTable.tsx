@@ -1,5 +1,5 @@
 import React from "react";
-import { Anchor, ShieldAlert, AlertCircle, AlertTriangle, Info } from 'lucide-react';
+import { Anchor, ShieldAlert, AlertCircle, AlertTriangle, Info, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { VesselData } from '../types';
 import { cn } from '../lib/utils';
 import { detectVesselAnomalies } from '../utils/anomalyDetector';
@@ -12,7 +12,10 @@ export function VesselTable({
   setColFilters,
   uniqueTerminals,
   uniqueStatuses,
-  setSelectedVessel
+  setSelectedVessel,
+  sortField,
+  sortOrder,
+  onSort
 }: {
   paginatedData: VesselData[];
   colFilters: any;
@@ -20,22 +23,107 @@ export function VesselTable({
   uniqueTerminals: string[];
   uniqueStatuses: string[];
   setSelectedVessel: (v: VesselData) => void;
+  sortField?: string;
+  sortOrder?: 'asc' | 'desc';
+  onSort?: (field: string) => void;
 }) {
+  const renderSortIndicator = (field: string) => {
+    if (!onSort) return null;
+    if (sortField !== field) {
+      return <ArrowUpDown className="w-3 h-3 text-white/40 ml-1 inline opacity-0 group-hover:opacity-100 transition-opacity" />;
+    }
+    return sortOrder === 'asc' 
+      ? <ArrowUp className="w-3 h-3 text-fab-gold ml-1 inline" />
+      : <ArrowDown className="w-3 h-3 text-fab-gold ml-1 inline" />;
+  };
+
   return (
     <section className="border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden relative">
       <div className="overflow-x-auto max-h-[600px] no-scrollbar">
         <table className="w-full text-left border-collapse min-w-[1000px]">
           <thead className="sticky top-0 z-10">
             <tr className="bg-fab-blue text-white shadow-sm">
-              <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">ID</th>
-              <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Vessel Name</th>
-              <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Voyage Type</th>
-              <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Terminal</th>
-              <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Load Volume (MT/CBM)</th>
-              <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Cargo Description</th>
-              <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Status</th>
-              <th className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10">Arrival</th>
-              <th className="p-4 text-[10px] font-bold uppercase tracking-wider">Departure</th>
+              <th 
+                onClick={() => onSort?.('controlNo')}
+                className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10 cursor-pointer hover:bg-slate-800 transition-colors group select-none"
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span>ID</span>
+                  {renderSortIndicator('controlNo')}
+                </div>
+              </th>
+              <th 
+                onClick={() => onSort?.('vesselName')}
+                className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10 cursor-pointer hover:bg-slate-800 transition-colors group select-none"
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span>Vessel Name</span>
+                  {renderSortIndicator('vesselName')}
+                </div>
+              </th>
+              <th 
+                onClick={() => onSort?.('orientation')}
+                className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10 cursor-pointer hover:bg-slate-800 transition-colors group select-none"
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span>Voyage Type</span>
+                  {renderSortIndicator('orientation')}
+                </div>
+              </th>
+              <th 
+                onClick={() => onSort?.('terminal')}
+                className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10 cursor-pointer hover:bg-slate-800 transition-colors group select-none"
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span>Terminal</span>
+                  {renderSortIndicator('terminal')}
+                </div>
+              </th>
+              <th 
+                onClick={() => onSort?.('loadVolume')}
+                className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10 cursor-pointer hover:bg-slate-800 transition-colors group select-none"
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span>Load Volume (MT/CBM)</span>
+                  {renderSortIndicator('loadVolume')}
+                </div>
+              </th>
+              <th 
+                onClick={() => onSort?.('cargoDesc')}
+                className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10 cursor-pointer hover:bg-slate-800 transition-colors group select-none"
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span>Cargo Description</span>
+                  {renderSortIndicator('cargoDesc')}
+                </div>
+              </th>
+              <th 
+                onClick={() => onSort?.('status')}
+                className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10 cursor-pointer hover:bg-slate-800 transition-colors group select-none"
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span>Status</span>
+                  {renderSortIndicator('status')}
+                </div>
+              </th>
+              <th 
+                onClick={() => onSort?.('arrivalDate')}
+                className="p-4 text-[10px] font-bold uppercase tracking-wider border-r border-white/10 cursor-pointer hover:bg-slate-800 transition-colors group select-none"
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span>Arrival</span>
+                  {renderSortIndicator('arrivalDate')}
+                </div>
+              </th>
+              <th 
+                onClick={() => onSort?.('departureDate')}
+                className="p-4 text-[10px] font-bold uppercase tracking-wider cursor-pointer hover:bg-slate-800 transition-colors group select-none"
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span>Departure</span>
+                  {renderSortIndicator('departureDate')}
+                </div>
+              </th>
             </tr>
             <tr className="bg-slate-50 border-b border-slate-200">
               <td className="p-2 border-r border-slate-200">
